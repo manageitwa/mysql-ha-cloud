@@ -11,6 +11,7 @@ from mcm.actions import Actions
 from mcm.consul import Consul
 from mcm.mysql import Mysql
 from mcm.proxysql import Proxysql
+from mcm.utils import Utils
 
 parser = argparse.ArgumentParser(
     description="MySQL cluster manager",
@@ -31,13 +32,21 @@ logging.basicConfig(level=args.log_level,
                     format='%(asctime)-15s %(levelname)s %(name)s %(message)s')
 
 # Check for all needed env vars
-required_envvars = ['CONSUL_BIND_INTERFACE', 'CONSUL_BOOTSTRAP_SERVER',
-                    'MINIO_ACCESS_KEY', 'MINIO_SECRET_KEY', 'MINIO_URL',
+required_envvars = ['CONSUL_BIND_INTERFACE', 'CONSUL_BOOTSTRAP_SERVER', 'MINIO_URL']
+required_envvars_or_secrets = ['MINIO_ACCESS_KEY', 'MINIO_SECRET_KEY',
                     'MYSQL_ROOT_PASSWORD', 'MYSQL_BACKUP_USER', 'MYSQL_BACKUP_PASSWORD',
-                    'MYSQL_REPLICATION_USER', 'MYSQL_REPLICATION_PASSWORD']
+                    'MYSQL_REPLICATION_USER', 'MYSQL_REPLICATION_PASSWORD',
+                    'MYSQL_APPLICATION_USER', 'MYSQL_APPLICATION_PASSWORD']
 
 for required_var in required_envvars:
     if not required_var in os.environ:
+        logging.error("Required environment %s not found, exiting", required_var)
+        sys.exit(1)
+
+for required_var in required_envvars_or_secrets:
+    try:
+        Utils.get_envvar_or_secret(required_var)
+    except Exception as e:
         logging.error("Required environment %s not found, exiting", required_var)
         sys.exit(1)
 

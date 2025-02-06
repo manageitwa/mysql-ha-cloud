@@ -49,8 +49,8 @@ class Mysql:
 
         # Create application user
         logging.debug("Creating MySQL user for the application")
-        application_user = os.environ.get("MYSQL_APPLICATION_USER")
-        appication_password = os.environ.get("MYSQL_APPLICATION_PASSWORD")
+        application_user = Utils.get_envvar_or_secret("MYSQL_APPLICATION_USER")
+        appication_password = Utils.get_envvar_or_secret("MYSQL_APPLICATION_PASSWORD")
 
         # Password needs to be mysql_native_password for ProxySQL
         # See https://github.com/sysown/proxysql/issues/2580
@@ -63,8 +63,8 @@ class Mysql:
 
         # Create backup user
         logging.debug("Creating MySQL user for backups")
-        backup_user = os.environ.get("MYSQL_BACKUP_USER")
-        backup_password = os.environ.get("MYSQL_BACKUP_PASSWORD")
+        backup_user = Utils.get_envvar_or_secret("MYSQL_BACKUP_USER")
+        backup_password = Utils.get_envvar_or_secret("MYSQL_BACKUP_PASSWORD")
         Mysql.execute_statement_or_exit(f"CREATE USER '{backup_user}'@'localhost' "
                                         f"IDENTIFIED BY '{backup_password}'")
         Mysql.execute_statement_or_exit("GRANT BACKUP_ADMIN, PROCESS, RELOAD, LOCK TABLES, "
@@ -74,8 +74,8 @@ class Mysql:
 
         # Create replication user
         logging.debug("Creating replication user")
-        replication_user = os.environ.get("MYSQL_REPLICATION_USER")
-        replication_password = os.environ.get("MYSQL_REPLICATION_PASSWORD")
+        replication_user = Utils.get_envvar_or_secret("MYSQL_REPLICATION_USER")
+        replication_password = Utils.get_envvar_or_secret("MYSQL_REPLICATION_PASSWORD")
         Mysql.execute_statement_or_exit(f"CREATE USER '{replication_user}'@'%' "
                                         f"IDENTIFIED BY '{replication_password}'")
         Mysql.execute_statement_or_exit("GRANT REPLICATION SLAVE ON *.* TO "
@@ -83,7 +83,7 @@ class Mysql:
 
         # Change permissions for the root user
         logging.debug("Set permissions for the root user")
-        root_password = os.environ.get("MYSQL_ROOT_PASSWORD")
+        root_password = Utils.get_envvar_or_secret("MYSQL_ROOT_PASSWORD")
         Mysql.execute_statement_or_exit(f"CREATE USER 'root'@'%' IDENTIFIED BY '{root_password}'")
         Mysql.execute_statement_or_exit("GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' "
                                         "WITH GRANT OPTION")
@@ -121,8 +121,8 @@ class Mysql:
 
         logging.info("Setting up replication (leader=%s)", leader_ip)
 
-        replication_user = os.environ.get("MYSQL_REPLICATION_USER")
-        replication_password = os.environ.get("MYSQL_REPLICATION_PASSWORD")
+        replication_user = Utils.get_envvar_or_secret("MYSQL_REPLICATION_USER")
+        replication_password = Utils.get_envvar_or_secret("MYSQL_REPLICATION_PASSWORD")
 
         Mysql.execute_query_as_root("STOP SLAVE", discard_result=True)
 
@@ -218,7 +218,7 @@ class Mysql:
         # Use root password for the connection or not
         root_password = None
         if use_root_password:
-            root_password = os.environ.get("MYSQL_ROOT_PASSWORD")
+            root_password = Utils.get_envvar_or_secret("MYSQL_ROOT_PASSWORD")
 
         Mysql.wait_for_connection(password=root_password)
 
@@ -236,7 +236,7 @@ class Mysql:
 
         # Try to shutdown the server using the root password
         if not result:
-            root_password = os.environ.get("MYSQL_ROOT_PASSWORD")
+            root_password = Utils.get_envvar_or_secret("MYSQL_ROOT_PASSWORD")
             Mysql.execute_statement(sql="SHUTDOWN", password=root_password)
 
     @staticmethod
@@ -245,7 +245,7 @@ class Mysql:
         Execute the SQL query and return result.
         """
 
-        root_password = os.environ.get("MYSQL_ROOT_PASSWORD")
+        root_password = Utils.get_envvar_or_secret("MYSQL_ROOT_PASSWORD")
 
         cnx = None
 
@@ -361,8 +361,8 @@ class Mysql:
         os.makedirs(backup_dir)
 
         # Create mysql backup
-        backup_user = os.environ.get("MYSQL_BACKUP_USER")
-        backup_password = os.environ.get("MYSQL_BACKUP_PASSWORD")
+        backup_user = Utils.get_envvar_or_secret("MYSQL_BACKUP_USER")
+        backup_password = Utils.get_envvar_or_secret("MYSQL_BACKUP_PASSWORD")
         xtrabackup = [Mysql.xtrabackup_binary, f"--user={backup_user}",
                       f"--password={backup_password}", "--backup",
                       f"--target-dir={backup_dest}"]
@@ -391,9 +391,9 @@ class Mysql:
         logging.info("Backup was successfully created")
 
     @staticmethod
-    def create_backup_if_needed(maxage_seconds=60*60*6):
+    def create_backup_if_needed(maxage_seconds=60*30):
         """
-        Create a new backup if needed. Default age is 6h
+        Create a new backup if needed. Default age is 30m
         """
         logging.debug("Checking for backups")
 

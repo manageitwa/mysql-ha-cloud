@@ -345,13 +345,13 @@ class Consul:
         consul_args.append("--data-dir")
         consul_args.append("/tmp/consul")
 
-        consul_interface = os.environ.get("CONSUL_BIND_INTERFACE")
+        consul_interface = Utils.get_envvar_or_secret("CONSUL_BIND_INTERFACE")
 
         if consul_interface is not None:
             consul_args.append("--bind")
             consul_args.append(f'{{{{ GetInterfaceIP "{consul_interface}" }}}}')
 
-        consul_seed = os.environ.get("CONSUL_BOOTSTRAP_SERVER")
+        consul_seed = Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_SERVER")
 
         if consul_seed is not None:
             consul_args.append("--join")

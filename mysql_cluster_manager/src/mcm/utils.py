@@ -15,6 +15,23 @@ class Utils:
     Utilities for the project
     """
 
+    def get_envvar_or_secret(name):
+        """
+        Get the value of an environment variable, or the contents of a secret
+        file when using a _FILE suffix
+        """
+
+        if f"{name}_FILE" in os.environ:
+            secret_file = os.environ.get(f"{name}_FILE")
+            if os.path.exists(secret_file):
+                with open(secret_file, "r") as file:
+                    return file.read().strip()
+
+        if name in os.environ:
+            return os.environ[name]
+
+        raise Exception(f"Environment variable {name} or secret {name}_FILE not found")
+
     @staticmethod
     def get_local_ip_address():
         """

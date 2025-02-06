@@ -21,8 +21,8 @@ class Minio:
         logging.info("Setup MinIO agent")
 
         minio_url = os.environ.get("MINIO_URL")
-        minio_access_key = os.environ.get("MINIO_ACCESS_KEY")
-        minio_secret_key = os.environ.get("MINIO_SECRET_KEY")
+        minio_access_key = Utils.get_envvar_or_secret("MINIO_ACCESS_KEY")
+        minio_secret_key = Utils.get_envvar_or_secret("MINIO_SECRET_KEY")
 
         bucket_name = "backup/mysqlbackup"
 

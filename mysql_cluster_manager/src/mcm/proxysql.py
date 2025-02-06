@@ -5,6 +5,7 @@ import logging
 import subprocess
 
 from mcm.mysql import Mysql
+from mcm.utils import Utils
 
 class Proxysql:
     """
@@ -26,8 +27,8 @@ class Proxysql:
         logging.info("Performing initial ProxySQL setup")
 
         # Setup Monitoring User
-        replication_user = os.environ.get("MYSQL_REPLICATION_USER")
-        replication_password = os.environ.get("MYSQL_REPLICATION_PASSWORD")
+        replication_user = Utils.get_envvar_or_secret("MYSQL_REPLICATION_USER")
+        replication_password = Utils.get_envvar_or_secret("MYSQL_REPLICATION_PASSWORD")
 
         Proxysql.perform_sql_query(f"UPDATE global_variables SET variable_value='{replication_user}' "
                                    "WHERE variable_name='mysql-monitor_username'")
@@ -46,8 +47,8 @@ class Proxysql:
                                    "destination_hostgroup, apply) VALUES (1, '^SELECT.*FOR UPDATE', 1, 1)")
 
         # Configure Application User
-        application_user = os.environ.get("MYSQL_APPLICATION_USER")
-        application_password = os.environ.get("MYSQL_APPLICATION_PASSWORD")
+        application_user = Utils.get_envvar_or_secret("MYSQL_APPLICATION_USER")
+        application_password = Utils.get_envvar_or_secret("MYSQL_APPLICATION_PASSWORD")
 
         Proxysql.perform_sql_query("DELETE FROM mysql_users")
         Proxysql.perform_sql_query("INSERT INTO mysql_users(username, password, default_hostgroup) "

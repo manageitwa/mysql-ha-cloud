@@ -6,11 +6,11 @@ import logging
 
 from datetime import timedelta, datetime
 
-import mcm.consul as Consul
-import mcm.minio as Minio
-import mcm.mysql as Mysql
-import mcm.proxysql as Proxysql
-import mcm.utils as Utils
+from mcm.consul import Consul
+from mcm.minio import Minio
+from mcm.mysql import Mysql
+from mcm.proxysql import Proxysql
+from mcm.utils import Utils
 
 class Actions:
     """The actions of the application"""

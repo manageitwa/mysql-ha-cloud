@@ -13,9 +13,9 @@ from datetime import timedelta
 
 import mysql.connector
 
-import mcm.consul as Consul
-import mcm.minio as Minio
-import mcm.utils as Utils
+from mcm.consul import Consul
+from mcm.minio import Minio
+from mcm.utils import Utils
 
 class Mysql:
 

@@ -7,9 +7,6 @@ from datetime import datetime
 
 import netifaces
 
-import mcm.minio as Minio
-
-
 class Utils:
     """
     Utilities for the project
@@ -53,6 +50,8 @@ class Utils:
 
     @staticmethod
     def wait_for_backup_exists(consul):
+        from mcm.minio import Minio
+        
         """
         Wait for a backup to be occour
         """

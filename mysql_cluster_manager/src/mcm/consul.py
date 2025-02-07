@@ -9,7 +9,7 @@ import subprocess
 
 import consul as pyconsul
 
-import mcm.utils as Utils
+from mcm.utils import Utils
 
 class Consul:
 

@@ -7,11 +7,11 @@ import sys
 import logging
 import argparse
 
-import mcm.actions as Actions
-import mcm.consul as Consul
-import mcm.mysql as Mysql
-import mcm.proxysql as Proxysql
-import mcm.utils as Utils
+from mcm.actions import Actions
+from mcm.consul import Consul
+from mcm.mysql import Mysql
+from mcm.proxysql import Proxysql
+from mcm.utils import Utils
 
 parser = argparse.ArgumentParser(
     description="MySQL cluster manager",

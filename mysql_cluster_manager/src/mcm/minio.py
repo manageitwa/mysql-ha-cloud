@@ -33,14 +33,18 @@ class Minio:
                    minio_url, minio_access_key, minio_secret_key]
         subprocess.run(mc_args, check=True)
 
-        # Create bucket
-        mc_create_bucket = [Minio.minio_binary, "mb", bucket_name, "-p"]
-        subprocess.run(mc_create_bucket, check=True)
+        # Create bucket if not exists
+        mc_create_bucket = [Minio.minio_binary, "mb", bucket_name]
+        process = subprocess.run(mc_create_bucket)
 
-        # Set expire policy on bucket
-        mc_set_policy_bucket = [Minio.minio_binary, "ilm", "edit", "--id=expire_rule",
-                                "-expiry-days=7", bucket_name]
-        subprocess.run(mc_set_policy_bucket, check=True)
+        if process.returncode == 0:
+            logging.debug("Bucket '%s' created", bucket_name)
+
+            # Set ILM policy for bucket
+            mc_set_policy_bucket = [Minio.minio_binary, "ilm", "rule", "add", "--expiry-days=1", bucket_name]
+            subprocess.run(mc_set_policy_bucket, check=True)
+        else:
+            logging.debug("Bucket '%s' already exists", bucket_name)
 
     @staticmethod
     def get_backup_info():

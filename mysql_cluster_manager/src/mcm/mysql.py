@@ -391,7 +391,7 @@ class Mysql:
         logging.info("Backup was successfully created")
 
     @staticmethod
-    def create_backup_if_needed(maxage_seconds=60*30):
+    def create_backup_if_needed(maxage_seconds=60*60):
         """
         Create a new backup if needed. Default age is 30m
         """

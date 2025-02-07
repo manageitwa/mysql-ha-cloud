@@ -5,7 +5,7 @@ import logging
 import datetime
 import subprocess
 
-import mcm.utils.Utils as Utils
+import mcm.utils as Utils
 
 class Minio:
     """

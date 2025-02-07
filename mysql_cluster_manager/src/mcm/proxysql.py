@@ -4,8 +4,8 @@ import os
 import logging
 import subprocess
 
-from mcm.mysql import Mysql
-from mcm.utils import Utils
+import mcm.mysql as Mysql
+import mcm.utils as Utils
 
 class Proxysql:
     """

@@ -7,7 +7,7 @@ from datetime import datetime
 
 import netifaces
 
-from mcm.minio import Minio
+import mcm.minio.Minio as Minio
 
 
 class Utils:

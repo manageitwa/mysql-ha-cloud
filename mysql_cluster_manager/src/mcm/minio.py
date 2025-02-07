@@ -5,6 +5,8 @@ import logging
 import datetime
 import subprocess
 
+import mcm.utils.Utils as Utils
+
 class Minio:
     """
     This class encapsulates all Minio related things

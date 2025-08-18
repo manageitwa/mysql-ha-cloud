@@ -2,10 +2,6 @@ networks:
   mysql-ha:
     driver: bridge
 
-volumes:
-  mysql-ha-snapshot:
-    driver: local
-
 services:
   consul:
     image: hashicorp/consul:1.21
@@ -41,8 +37,34 @@ services:
       - ./mysql_cluster_manager/src/mcm:/cluster/mcm
       - ./mysql_cluster_manager/src/mysql_cluster_manager.py:/cluster/mysql_cluster_manager.py
       - ./entrypoint.sh:/cluster/entrypoint.sh
-      - mysql-ha-snapshot:/snapshot
     ports:
-      - 3306:3306
-      # - 6032:6032
-      # - 3306:6033
+      - 6032:6032
+      - 3306:6033
+
+  mysql2:
+    image: manageitwa/mysql-ha-cloud:dev
+    build: .
+    environment:
+      CONSUL_BOOTSTRAP_SERVER: consul
+
+      # Obviously, don't use these in production
+      MYSQL_ROOT_PASSWORD: root_pass
+      MYSQL_DATABASE: application
+      MYSQL_USER: application_user
+      MYSQL_PASSWORD: application_pass
+
+      MYSQL_BACKUP_USER: backup_user
+      MYSQL_BACKUP_PASSWORD: backup_pass
+
+      MYSQL_REPLICATION_USER: replication_user
+      MYSQL_REPLICATION_PASSWORD: replication_pass
+    networks:
+      - mysql-ha
+    volumes:
+      - ./snapshot:/snapshot
+      - ./mysql_cluster_manager/src/mcm:/cluster/mcm
+      - ./mysql_cluster_manager/src/mysql_cluster_manager.py:/cluster/mysql_cluster_manager.py
+      - ./entrypoint.sh:/cluster/entrypoint.sh
+    ports:
+      - 6033:6032
+      - 3307:6033

@@ -14,7 +14,6 @@ from datetime import timedelta
 import mysql.connector
 
 from mcm.consul import Consul
-from mcm.minio import Minio
 from mcm.utils import Utils
 
 class Mysql:
@@ -24,7 +23,7 @@ class Mysql:
     """
 
     xtrabackup_binary = "/usr/bin/xtrabackup"
-    mysql_server_binary = "/usr/bin/mysqld_safe"
+    mysql_server_binary = "/usr/sbin/mysqld"
     mysqld_binary = "/usr/sbin/mysqld"
     mysql_datadir = "/var/lib/mysql"
 
@@ -41,7 +40,6 @@ class Mysql:
             return False
 
         mysql_init = [Mysql.mysqld_binary, "--initialize-insecure", "--user=mysql"]
-
         subprocess.run(mysql_init, check=True)
 
         # Start server the first time
@@ -49,27 +47,25 @@ class Mysql:
 
         # Create application user
         logging.debug("Creating MySQL user for the application")
-        application_user = Utils.get_envvar_or_secret("MYSQL_APPLICATION_USER")
-        appication_password = Utils.get_envvar_or_secret("MYSQL_APPLICATION_PASSWORD")
+        application_user = Utils.get_envvar_or_secret("MYSQL_USER")
+        appication_password = Utils.get_envvar_or_secret("MYSQL_PASSWORD")
 
-        # Password needs to be mysql_native_password for ProxySQL
-        # See https://github.com/sysown/proxysql/issues/2580
-        Mysql.execute_statement_or_exit(f"CREATE USER '{application_user}'@'localhost' "
-                                        f"IDENTIFIED WITH mysql_native_password BY '{appication_password}'")
-        Mysql.execute_statement_or_exit(f"GRANT ALL PRIVILEGES ON *.* TO '{application_user}'@'localhost'")
         Mysql.execute_statement_or_exit(f"CREATE USER '{application_user}'@'%' "
-                                        f"IDENTIFIED WITH mysql_native_password BY '{appication_password}'")
-        Mysql.execute_statement_or_exit(f"GRANT ALL PRIVILEGES ON *.* TO '{application_user}'@'%'")
+                                        f"IDENTIFIED WITH caching_sha2_password BY '{appication_password}'")
 
         # Create backup user
         logging.debug("Creating MySQL user for backups")
         backup_user = Utils.get_envvar_or_secret("MYSQL_BACKUP_USER")
         backup_password = Utils.get_envvar_or_secret("MYSQL_BACKUP_PASSWORD")
         Mysql.execute_statement_or_exit(f"CREATE USER '{backup_user}'@'localhost' "
-                                        f"IDENTIFIED BY '{backup_password}'")
-        Mysql.execute_statement_or_exit("GRANT BACKUP_ADMIN, PROCESS, RELOAD, LOCK TABLES, "
+                                        f"IDENTIFIED WITH caching_sha2_password BY '{backup_password}'")
+        Mysql.execute_statement_or_exit("GRANT BACKUP_ADMIN, PROCESS, RELOAD, LOCK TABLES, REPLICATION CLIENT, REPLICATION_SLAVE_ADMIN, "
                                         f"REPLICATION CLIENT ON *.* TO '{backup_user}'@'localhost'")
         Mysql.execute_statement_or_exit("GRANT SELECT ON performance_schema.log_status TO "
+                                        f"'{backup_user}'@'localhost'")
+        Mysql.execute_statement_or_exit("GRANT SELECT ON performance_schema.keyring_component_status TO "
+                                        f"'{backup_user}'@'localhost'")
+        Mysql.execute_statement_or_exit("GRANT SELECT ON performance_schema.replication_group_members TO "
                                         f"'{backup_user}'@'localhost'")
 
         # Create replication user
@@ -77,18 +73,25 @@ class Mysql:
         replication_user = Utils.get_envvar_or_secret("MYSQL_REPLICATION_USER")
         replication_password = Utils.get_envvar_or_secret("MYSQL_REPLICATION_PASSWORD")
         Mysql.execute_statement_or_exit(f"CREATE USER '{replication_user}'@'%' "
-                                        f"IDENTIFIED BY '{replication_password}'")
+                                        f"IDENTIFIED WITH caching_sha2_password BY '{replication_password}'")
         Mysql.execute_statement_or_exit("GRANT REPLICATION SLAVE ON *.* TO "
                                         f"'{replication_user}'@'%'")
 
         # Change permissions for the root user
         logging.debug("Set permissions for the root user")
         root_password = Utils.get_envvar_or_secret("MYSQL_ROOT_PASSWORD")
-        Mysql.execute_statement_or_exit(f"CREATE USER 'root'@'%' IDENTIFIED BY '{root_password}'")
+        Mysql.execute_statement_or_exit(f"CREATE USER 'root'@'%' IDENTIFIED WITH caching_sha2_password BY '{root_password}'")
         Mysql.execute_statement_or_exit("GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' "
                                         "WITH GRANT OPTION")
         Mysql.execute_statement_or_exit("ALTER USER 'root'@'localhost' "
-                                        f"IDENTIFIED BY '{root_password}'")
+                                        f"IDENTIFIED WITH caching_sha2_password BY '{root_password}'")
+
+        # Create database if specified
+        if Utils.get_envvar_or_secret("MYSQL_DATABASE"):
+            database_name = Utils.get_envvar_or_secret("MYSQL_DATABASE")
+            logging.debug("Setting up initial database")
+            Mysql.execute_statement_or_exit(sql=f"CREATE DATABASE IF NOT EXISTS `{database_name}`", username="root", password=root_password)
+            Mysql.execute_statement_or_exit(sql=f"GRANT ALL PRIVILEGES ON `{database_name}`.* TO '{application_user}'@'%'", username="root", password=root_password)
 
         # Shutdown MySQL server
         logging.debug("Inital MySQL setup done, shutdown server..")
@@ -124,7 +127,7 @@ class Mysql:
         replication_user = Utils.get_envvar_or_secret("MYSQL_REPLICATION_USER")
         replication_password = Utils.get_envvar_or_secret("MYSQL_REPLICATION_PASSWORD")
 
-        Mysql.execute_query_as_root("STOP SLAVE", discard_result=True)
+        Mysql.execute_query_as_root("STOP REPLICA", discard_result=True)
 
         Mysql.execute_query_as_root(f"CHANGE MASTER TO MASTER_HOST = '{leader_ip}', "
                                     f"MASTER_PORT = 3306, MASTER_USER = '{replication_user}', "
@@ -132,7 +135,7 @@ class Mysql:
                                     "MASTER_AUTO_POSITION = 1, GET_MASTER_PUBLIC_KEY = 1"
                                     , discard_result=True)
 
-        Mysql.execute_query_as_root("START SLAVE", discard_result=True)
+        Mysql.execute_query_as_root("START REPLICA", discard_result=True)
 
         # Set replicia to read only
         logging.info("Set MySQL-Server mode to read-only")
@@ -145,8 +148,8 @@ class Mysql:
         Stop the replication
         """
         logging.debug("Removing old replication configuraion")
-        Mysql.execute_query_as_root("STOP SLAVE", discard_result=True)
-        Mysql.execute_query_as_root("RESET SLAVE ALL", discard_result=True)
+        Mysql.execute_query_as_root("STOP REPLICA", discard_result=True)
+        Mysql.execute_query_as_root("RESET REPLICA ALL", discard_result=True)
 
         # Accept writes
         logging.info("Set MySQL-Server mode to read-write")
@@ -158,7 +161,7 @@ class Mysql:
         """
         Get the current replication leader ip
         """
-        slave_status = Mysql.execute_query_as_root("SHOW SLAVE STATUS")
+        slave_status = Mysql.execute_query_as_root("SHOW REPLICA STATUS")
 
         if len(slave_status) != 1:
             return None
@@ -175,29 +178,29 @@ class Mysql:
         Is the repliation log from the master completely processed
         """
 
-        slave_status = Mysql.execute_query_as_root("SHOW SLAVE STATUS")
+        slave_status = Mysql.execute_query_as_root("SHOW REPLICA STATUS")
 
         if len(slave_status) != 1:
             return False
 
-        if not 'Slave_IO_State' in slave_status[0]:
-            logging.error("Invalid output, Slave_IO_State not found %s", slave_status)
+        if not 'Replica_IO_State' in slave_status[0]:
+            logging.error("Invalid output, Replica_IO_State not found %s", slave_status)
             return False
 
         # Leader is sending data
-        io_state = slave_status[0]['Slave_IO_State']
+        io_state = slave_status[0]['Replica_IO_State']
         logging.debug("Follower IO state is '%s'", io_state)
         if io_state != "Waiting for master to send event":
             return False
 
-        if not 'Slave_SQL_Running_State' in slave_status[0]:
-            logging.error("Invalid output, Slave_SQL_Running_State not found %s", slave_status)
+        if not 'Replica_SQL_Running_State' in slave_status[0]:
+            logging.error("Invalid output, Replica_SQL_Running_State not found %s", slave_status)
             return False
 
         # Data is not completely proessed
-        sql_state = slave_status[0]['Slave_SQL_Running_State']
+        sql_state = slave_status[0]['Replica_SQL_Running_State']
         logging.debug("Follower SQL state is '%s'", sql_state)
-        if sql_state != "Slave has read all relay log; waiting for more updates":
+        if sql_state != "Replica has read all relay log; waiting for more updates":
             return False
 
         return True
@@ -344,18 +347,14 @@ class Mysql:
         the backup into a S3 bucket.
         """
 
-        # Call Setup to ensure bucket and policies do exist
-        Minio.setup_connection()
-
-        # Backup directory
+        backup_dir = "/snapshot/pending"
+        current_dir = "/snapshot/current"
         current_time = time.time()
-        backup_dir = f"/tmp/mysql_backup_{current_time}"
-        backup_folder_name = "mysql"
-        backup_dest = f"{backup_dir}/{backup_folder_name}"
 
-        logging.info("Backing up MySQL into dir %s", backup_dest)
+        logging.info("Backing up MySQL into dir %s", backup_dir)
         if os.path.exists(backup_dir):
-            logging.error("Backup path %s already exists, skipping backup run", backup_dest)
+            logging.warning("Backup path %s already exists, removing", backup_dir)
+            rmtree(backup_dir)
 
         # Crate backup dir
         os.makedirs(backup_dir)
@@ -365,35 +364,37 @@ class Mysql:
         backup_password = Utils.get_envvar_or_secret("MYSQL_BACKUP_PASSWORD")
         xtrabackup = [Mysql.xtrabackup_binary, f"--user={backup_user}",
                       f"--password={backup_password}", "--backup",
-                      f"--target-dir={backup_dest}"]
+                      f"--target-dir={backup_dir}"]
 
         subprocess.run(xtrabackup, check=True)
 
         # Prepare backup
         xtrabackup_prepare = [Mysql.xtrabackup_binary, "--prepare",
-                              f"--target-dir={backup_dest}"]
+                              f"--target-dir={backup_dir}"]
 
         subprocess.run(xtrabackup_prepare, check=True)
-
-        # Compress backup (structure in tar mysql/*)
-        backup_file = f"/tmp/mysql_backup_{current_time}.tgz"
-        tar = ["/bin/tar", "zcf", backup_file, "-C", backup_dir, backup_folder_name]
-        subprocess.run(tar, check=True)
-
-        # Upload Backup to S3 Bucket
-        mc_args = [Minio.minio_binary, "cp", backup_file, "backup/mysqlbackup/"]
-        subprocess.run(mc_args, check=True)
-
-        # Remove old backup data
-        rmtree(backup_dir)
-        os.remove(backup_file)
+        os.rename(backup_dir, current_dir);
 
         logging.info("Backup was successfully created")
 
     @staticmethod
-    def create_backup_if_needed(maxage_seconds=60*60):
+    def get_snapshot_time():
         """
-        Create a new backup if needed. Default age is 30m
+        Get the snapshot time, if any is available.
+        """
+
+        current_dir = "/snapshot/current"
+
+        if not os.path.exists(current_dir):
+            return None
+
+        time = os.path.getmtime(current_dir)
+        return time
+
+    @staticmethod
+    def create_backup_if_needed(maxage_seconds=60*15):
+        """
+        Create a new backup if needed. Default age is 15m
         """
         logging.debug("Checking for backups")
 
@@ -402,11 +403,10 @@ class Mysql:
             logging.debug("We are not the replication master, skipping backup check")
             return False
 
-        backup_name, backup_date = Minio.get_latest_backup()
+        backup_date = Mysql.get_snapshot_time()
 
         if Utils.is_refresh_needed(backup_date, timedelta(seconds=maxage_seconds)):
-            logging.info("Old backup is outdated (%s, %s), creating new one",
-                         backup_name, backup_date)
+            logging.info("Old backup is outdated (%s), creating new one", backup_date)
 
             # Perform backup in extra thread to prevent Consul loop interruption
             backup_thread = threading.Thread(target=Mysql.backup_data)

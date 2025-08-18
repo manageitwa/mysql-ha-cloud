@@ -32,22 +32,37 @@ logging.basicConfig(level=args.log_level,
                     format='%(asctime)-15s %(levelname)s %(name)s %(message)s')
 
 # Check for all needed env vars
-required_envvars = ['CONSUL_BIND_INTERFACE', 'CONSUL_BOOTSTRAP_SERVER', 'MINIO_URL']
-required_envvars_or_secrets = ['MINIO_ACCESS_KEY', 'MINIO_SECRET_KEY',
-                    'MYSQL_ROOT_PASSWORD', 'MYSQL_BACKUP_USER', 'MYSQL_BACKUP_PASSWORD',
-                    'MYSQL_REPLICATION_USER', 'MYSQL_REPLICATION_PASSWORD',
-                    'MYSQL_APPLICATION_USER', 'MYSQL_APPLICATION_PASSWORD']
+required_envvars = [
+    'CONSUL_BOOTSTRAP_SERVER'
+]
+required_envvars_or_secrets = [
+    'MYSQL_ROOT_PASSWORD',
+    'MYSQL_BACKUP_USER',
+    'MYSQL_BACKUP_PASSWORD',
+    'MYSQL_REPLICATION_USER',
+    'MYSQL_REPLICATION_PASSWORD',
+    'MYSQL_USER',
+    'MYSQL_PASSWORD'
+]
 
 for required_var in required_envvars:
     if not required_var in os.environ:
-        logging.error("Required environment %s not found, exiting", required_var)
+        logging.error(
+            "Missing required environment variable \"%s\"",
+            required_var
+        )
         sys.exit(1)
 
 for required_var in required_envvars_or_secrets:
     try:
         Utils.get_envvar_or_secret(required_var)
-    except Exception as e:
-        logging.error("Required environment %s not found, exiting", required_var)
+    except Exception:
+        logging.error(
+            "Missing required environment variable \"%s\" - please define environment variable \"%s\" or environment file \"%s\"_FILE",
+            required_var,
+            required_var,
+            required_var
+        )
         sys.exit(1)
 
 # Perform operations

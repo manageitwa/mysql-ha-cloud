@@ -47,8 +47,8 @@ class Proxysql:
                                    "destination_hostgroup, apply) VALUES (1, '^SELECT.*FOR UPDATE', 1, 1)")
 
         # Configure Application User
-        application_user = Utils.get_envvar_or_secret("MYSQL_APPLICATION_USER")
-        application_password = Utils.get_envvar_or_secret("MYSQL_APPLICATION_PASSWORD")
+        application_user = Utils.get_envvar_or_secret("MYSQL_USER")
+        application_password = Utils.get_envvar_or_secret("MYSQL_PASSWORD")
 
         Proxysql.perform_sql_query("DELETE FROM mysql_users")
         Proxysql.perform_sql_query("INSERT INTO mysql_users(username, password, default_hostgroup) "
@@ -119,9 +119,5 @@ class Proxysql:
         # Init proxysql
         proxysql_init = ["/usr/bin/proxysql", "--idle-threads", "-c", "/etc/proxysql.cnf", "--initial"]
         subprocess.run(proxysql_init, check=True)
-
-        # Start the proxysql
-        # proxysql = ["/usr/bin/proxysql", "--idle-threads", "-c", "/etc/proxysql.cnf"]
-        # subprocess.run(proxysql, check=True)
 
         return True

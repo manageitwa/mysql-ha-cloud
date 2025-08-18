@@ -47,7 +47,7 @@ class Consul:
 
         Consul.__instance = self
         logging.info("Register Consul connection")
-        self.client = pyconsul.Consul(host="localhost")
+        self.client = pyconsul.Consul()
         self.active_sessions = []
         self.node_health_session = self.create_node_health_session()
 
@@ -60,6 +60,7 @@ class Consul:
         """ Static access method. """
         if Consul.__instance is None:
             Consul()
+
         return Consul.__instance
 
     def start_session_auto_refresh_thread(self):
@@ -338,26 +339,30 @@ class Consul:
         """
         Start the local Consul agent.
         """
-
         logging.info("Starting Consul Agent")
         consul_args = ["consul"]
         consul_args.append("agent")
         consul_args.append("--data-dir")
         consul_args.append("/tmp/consul")
 
-        consul_interface = Utils.get_envvar_or_secret("CONSUL_BIND_INTERFACE")
-
-        if consul_interface is not None:
-            consul_args.append("--bind")
-            consul_args.append(f'{{{{ GetInterfaceIP "{consul_interface}" }}}}')
-
         consul_seed = Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_SERVER")
+        consul_interface = Utils.get_envvar_or_secret("MCM_BIND_INTERFACE", "eth0")
 
-        if consul_seed is not None:
-            consul_args.append("--join")
-            consul_args.append(consul_seed)
+        consul_args.append("--bind")
+        consul_args.append(f'{{{{ GetInterfaceIP "{consul_interface}" }}}}')
+
+        consul_args.append("--client")
+        consul_args.append("0.0.0.0");
+
+        consul_args.append("--retry-join")
+        consul_args.append(consul_seed)
+
+        logging.info("Consul args: %s", consul_args)
 
         # Run process in background
         consul_process = subprocess.Popen(consul_args)
+        logging.info("Consul agent started with PID %s", consul_process.pid)
+
+        time.sleep(1)
 
         return consul_process

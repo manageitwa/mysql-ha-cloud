@@ -12,7 +12,8 @@ class Utils:
     Utilities for the project
     """
 
-    def get_envvar_or_secret(name):
+    @staticmethod
+    def get_envvar_or_secret(name, default = None):
         """
         Get the value of an environment variable, or the contents of a secret
         file when using a _FILE suffix
@@ -20,14 +21,17 @@ class Utils:
 
         if f"{name}_FILE" in os.environ:
             secret_file = os.environ.get(f"{name}_FILE")
-            if os.path.exists(secret_file):
+            if secret_file is not None and os.path.exists(secret_file):
                 with open(secret_file, "r") as file:
                     return file.read().strip()
 
         if name in os.environ:
             return os.environ[name]
 
-        raise Exception(f"Environment variable {name} or secret {name}_FILE not found")
+        if default is None:
+            raise Exception(f"Environment variable {name} or secret {name}_FILE not found")
+        else:
+            return default
 
     @staticmethod
     def get_local_ip_address():
@@ -51,7 +55,7 @@ class Utils:
     @staticmethod
     def wait_for_backup_exists(consul):
         from mcm.minio import Minio
-        
+
         """
         Wait for a backup to be occour
         """

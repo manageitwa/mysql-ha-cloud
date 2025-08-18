@@ -1,54 +1,62 @@
-FROM mysql:8.0.41-bookworm
+FROM mysql:8.4-oracle
 
 SHELL ["/bin/bash", "-c"]
 
 RUN \
-    #
-    # Install system basics
-    #
-    apt-get update && \
-    apt-get install -y unzip curl wget gnupg2 lsb-release procps && \
-    #
+    # Install dependencies
+    microdnf install -y \
+        libev \
+        lz4 \
+        perl \
+        perl-DBI \
+        perl-DBD-MySQL \
+        procps \
+        python3-devel \
+        rsync \
+        unzip \
+        wget && \
     # Install Percona XtraBackup
-    #
-    apt-get install -y libdbd-mysql-perl libcurl4-openssl-dev rsync libev4 lz4 && \
-    wget https://downloads.percona.com/downloads/Percona-XtraBackup-8.0/Percona-XtraBackup-8.0.35-32/binary/debian/bookworm/x86_64/percona-xtrabackup-80_8.0.35-32-1.bookworm_amd64.deb -O /tmp/xtrabackup.deb && \ 
-    dpkg -i /tmp/xtrabackup.deb && \
-    rm /tmp/xtrabackup.deb && \
-    #
-    # Install Consul
-    #
-    wget https://releases.hashicorp.com/consul/1.20.2/consul_1.20.2_linux_amd64.zip -O /tmp/consul.zip && \
-    echo "1bf7ddf332f02e6e36082b0fdf6c3e8ce12a391e7ec7dafd3237bb12766a7fd5 /tmp/consul.zip" | sha256sum -c && \
+    wget https://downloads.percona.com/downloads/Percona-XtraBackup-8.4/Percona-XtraBackup-8.4.0-3/binary/redhat/9/x86_64/percona-xtrabackup-84-8.4.0-3.1.el9.x86_64.rpm -O /tmp/xtrabackup.rpm && \
+    rpm -i /tmp/xtrabackup.rpm && \
+    rm /tmp/xtrabackup.rpm && \
+    # Install Consul CLI
+    wget https://releases.hashicorp.com/consul/1.21.4/consul_1.21.4_linux_amd64.zip -O /tmp/consul.zip && \
+    echo "a641502dc2bd28e1ed72d3d48a0e8b98c83104d827cf33bee2aed198c0b849df /tmp/consul.zip" | sha256sum -c && \
     unzip /tmp/consul.zip -d /usr/local/bin && \
     rm /usr/local/bin/LICENSE.txt && \
     rm /tmp/consul.zip && \
-    #
-    # Install minIO client
-    #
-    wget https://dl.min.io/client/mc/release/linux-amd64/mc -O /usr/local/bin/mc && \
-    chmod +x /usr/local/bin/mc && \
-    #
-    # Install Python 3
-    #
-    apt-get install -y python3 python3-dev python3-pip && \
-    #
     # Install ProxySQL
-    #
-    wget https://github.com/sysown/proxysql/releases/download/v2.7.2/proxysql_2.7.2-debian12_amd64.deb -O /tmp/proxysql.deb && \
-    echo "e534be5aa64b7807beba89b41c7e52c6003a0326942a6ebc6d4da7e55571f9ef /tmp/proxysql.deb" | sha256sum -c && \
-    dpkg -i /tmp/proxysql.deb && \
-    rm /tmp/proxysql.deb
+    wget https://github.com/sysown/proxysql/releases/download/v3.0.2/proxysql-3.0.2-1-centos9.x86_64.rpm -O /tmp/proxysql.rpm && \
+    echo "b94d24dc7e4608e3b2006a43d7a1b112143d3fe108baee5136db1f7341d3aedf /tmp/proxysql.rpm" | sha256sum -c && \
+    rpm -i /tmp/proxysql.rpm && \
+    rm /tmp/proxysql.rpm && \
+    # Create directories for Cluster Manager and snapshot
+    mkdir /snapshot && \
+    mkdir /cluster && \
+    # chown 1000:1000 /snapshot && \
+    # chown 1000:1000 /cluster && \
+    # Clean up
+    microdnf clean all && \
+    rm -rf /var/cache/yum/* && \
+    rm -rf /var/lib/rpm/__db* && \
+    rm -rf /tmp/*
 
+# Install Cluster Manager and dependencies, and set up volume
+# USER 1000:1000
 WORKDIR /cluster
 
-COPY ./mysql_cluster_manager/requirements.txt .
+# COPY --chown=1000:1000 mysql_cluster_manager/requirements .
+# COPY --chown=1000:1000 mysql_cluster_manager/src .
+# COPY --chown=1000:1000 entrypoint.sh .
+
+COPY mysql_cluster_manager/requirements .
+COPY mysql_cluster_manager/src .
+COPY entrypoint.sh .
 
 # Install Python dependencies
-RUN pip3 install -r requirements.txt --break-system-packages
+ENV PYTHONUSERBASE=/cluster/.prefix
+RUN pip3 install --cache-dir /cluster/.cache --user -r requirements
 
-COPY ./mysql_cluster_manager/src .
-COPY ./entrypoint.sh .
-
-CMD ["bash", "entrypoint.sh"]
+VOLUME /snapshot
 EXPOSE 6032/tcp
+CMD ["bash", "entrypoint.sh"]

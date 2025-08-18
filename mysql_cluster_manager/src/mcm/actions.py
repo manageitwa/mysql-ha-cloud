@@ -7,7 +7,6 @@ import logging
 from datetime import timedelta, datetime
 
 from mcm.consul import Consul
-from mcm.minio import Minio
 from mcm.mysql import Mysql
 from mcm.proxysql import Proxysql
 from mcm.utils import Utils
@@ -26,8 +25,8 @@ class Actions:
 
         # Check if we have an existing backup to restore
         # Use this backup if exists, or init a new MySQL database
-        Minio.setup_connection()
-        backup_exists = Minio.does_backup_exists()
+        backup_exists = False
+        # backup_exists = Minio.does_backup_exists()
 
         # Test for unstable environment (other nodes are present and no leader is present)
         # We don't want to become the new leader on the restored backup directly
@@ -37,6 +36,7 @@ class Actions:
         while Consul.get_instance().get_replication_leader_ip() is None:
             nodes = Consul.get_instance().get_all_registered_nodes()
             if len(nodes) == 0:
+                logging.info("No other nodes detected, we can become the leader")
                 break
 
             logging.warning("Other nodes (%s) detected but no leader, waiting", nodes)

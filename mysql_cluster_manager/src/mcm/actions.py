@@ -10,6 +10,7 @@ from mcm.consul import Consul
 from mcm.mysql import Mysql
 from mcm.proxysql import Proxysql
 from mcm.utils import Utils
+from mcm.snapshot import Snapshot
 
 class Actions:
     """The actions of the application"""
@@ -25,8 +26,7 @@ class Actions:
 
         # Check if we have an existing backup to restore
         # Use this backup if exists, or init a new MySQL database
-        backup_exists = False
-        # backup_exists = Minio.does_backup_exists()
+        snapshotExists = Snapshot.exists()
 
         # Test for unstable environment (other nodes are present and no leader is present)
         # We don't want to become the new leader on the restored backup directly
@@ -35,6 +35,7 @@ class Actions:
         #
         while Consul.get_instance().get_replication_leader_ip() is None:
             nodes = Consul.get_instance().get_all_registered_nodes()
+
             if len(nodes) == 0:
                 logging.info("No other nodes detected, we can become the leader")
                 break
@@ -49,28 +50,23 @@ class Actions:
         Consul.get_instance().start_session_auto_refresh_thread()
 
         logging.info("Init local node (leader=%s, backup=%s)",
-                     replication_leader, backup_exists)
+                     replication_leader, snapshotExists)
 
-        if replication_leader and not backup_exists:
+        if replication_leader and not snapshotExists:
             Mysql.init_database_if_needed()
-        elif replication_leader and backup_exists:
+        elif replication_leader and snapshotExists:
             Mysql.restore_backup_or_exit()
-        elif not replication_leader and backup_exists:
+        elif not replication_leader and snapshotExists:
             Mysql.restore_backup_or_exit()
-        elif not replication_leader and not backup_exists:
+        elif not replication_leader and not snapshotExists:
             logging.info("We are not the replication leader, waiting for backups")
-            backup_exists = Utils.wait_for_backup_exists(Consul.get_instance())
+            snapshotExists = Utils.wait_for_backup_exists(Consul.get_instance())
 
-            if not backup_exists:
-                logging.error("No backups to restore available, please check master logs, exiting")
+            if not snapshotExists:
+                logging.error("No snapshot available, please check master logs or incomplete snapshot, exiting")
                 sys.exit(1)
 
             Mysql.restore_backup_or_exit()
-
-        else:
-            logging.error("This case should not happen (leader=%s, backup=%s)",
-                          replication_leader, backup_exists)
-            sys.exit(1)
 
         # Start ProxySQL
         Proxysql.start_proxysql()

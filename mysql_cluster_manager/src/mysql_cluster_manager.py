@@ -15,21 +15,43 @@ from mcm.utils import Utils
 
 parser = argparse.ArgumentParser(
     description="MySQL cluster manager",
-    epilog="For more info, please see: https://github.com/jnidzwetzki/mysql-ha-cloud")
+    epilog="For more info, please see: https://github.com/jnidzwetzki/mysql-ha-cloud"
+)
 
-AVAILABLE_OPERATIONS = "(join_or_bootstrap, mysql_backup, mysql_restore, mysql_start, mysql_stop)"
-parser.add_argument('operation', metavar='operation',
-                    help=f'Operation to be executed {AVAILABLE_OPERATIONS}')
+AVAILABLE_OPERATIONS = (
+    'join_or_bootstrap',
+    'mysql_backup',
+    'mysql_restore',
+    'mysql_start',
+    'mysql_stop'
+)
+parser.add_argument(
+    'operation',
+    metavar = 'operation',
+    help = f'Operation to be executed ({AVAILABLE_OPERATIONS})'
+)
 
-log_levels = ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
-parser.add_argument('--log-level', default='INFO', choices=log_levels)
+log_levels = (
+    'DEBUG',
+    'INFO',
+    'WARNING',
+    'ERROR',
+    'CRITICAL'
+)
+parser.add_argument(
+    '--log-level',
+    default = 'INFO',
+    choices = log_levels
+)
 
 # Parse args
 args = parser.parse_args()
 
 # Configure logging
-logging.basicConfig(level=args.log_level,
-                    format='%(asctime)-15s %(levelname)s %(name)s %(message)s')
+logging.basicConfig(
+    level = args.log_level,
+    format = '%(asctime)-15s %(levelname)s %(name)s %(message)s'
+)
 
 # Check for all needed env vars
 required_envvars = [

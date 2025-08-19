@@ -12,6 +12,7 @@ from mcm.consul import Consul
 from mcm.mysql import Mysql
 from mcm.proxysql import Proxysql
 from mcm.utils import Utils
+from mcm.snapshot import Snapshot
 
 parser = argparse.ArgumentParser(
     description="MySQL cluster manager",
@@ -66,9 +67,9 @@ for required_var in required_envvars_or_secrets:
 if args.operation == 'join_or_bootstrap':
     Actions.join_or_bootstrap()
 elif args.operation == 'mysql_backup':
-    Mysql.backup_data()
+    Snapshot.create()
 elif args.operation == 'mysql_restore':
-    Mysql.restore_backup()
+    Snapshot.restore()
 elif args.operation == 'mysql_start':
     Mysql.server_start()
 elif args.operation == 'mysql_stop':

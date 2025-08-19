@@ -129,10 +129,10 @@ class Mysql:
 
         Mysql.execute_query_as_root("STOP REPLICA", discard_result=True)
 
-        Mysql.execute_query_as_root(f"CHANGE MASTER TO MASTER_HOST = '{leader_ip}', "
-                                    f"MASTER_PORT = 3306, MASTER_USER = '{replication_user}', "
-                                    f"MASTER_PASSWORD = '{replication_password}', "
-                                    "MASTER_AUTO_POSITION = 1, GET_MASTER_PUBLIC_KEY = 1"
+        Mysql.execute_query_as_root(f"CHANGE REPLICATION SOURCE TO SOURCE_HOST = '{leader_ip}', "
+                                    f"SOURCE_PORT = 3306, SOURCE_USER = '{replication_user}', "
+                                    f"SOURCE_PASSWORD = '{replication_password}', "
+                                    "SOURCE_AUTO_POSITION = 1, GET_SOURCE_PUBLIC_KEY = 1"
                                     , discard_result=True)
 
         Mysql.execute_query_as_root("START REPLICA", discard_result=True)
@@ -166,11 +166,11 @@ class Mysql:
         if len(slave_status) != 1:
             return None
 
-        if not 'Master_Host' in slave_status[0]:
-            logging.error("Invalid output, master_host not found %s", slave_status)
+        if not 'Source_Host' in slave_status[0]:
+            logging.error("Invalid output, Source_Host not found %s", slave_status)
             return None
 
-        return slave_status[0]['Master_Host']
+        return slave_status[0]['Source_Host']
 
     @staticmethod
     def is_repliation_data_processed():
@@ -297,8 +297,6 @@ class Mysql:
                       elapsed_time, last_error)
         sys.exit(1)
 
-        return False
-
     @staticmethod
     def execute_statement_or_exit(sql=None, username='root',
                                   password=None, database='mysql',
@@ -341,61 +339,13 @@ class Mysql:
             return False
 
     @staticmethod
-    def backup_data():
+    def create_backup_if_needed(maxage_seconds=60*5):
         """
-        Backup the local MySQL Server and upload
-        the backup into a S3 bucket.
-        """
-
-        backup_dir = "/snapshot/pending"
-        current_dir = "/snapshot/current"
-        current_time = time.time()
-
-        logging.info("Backing up MySQL into dir %s", backup_dir)
-        if os.path.exists(backup_dir):
-            logging.warning("Backup path %s already exists, removing", backup_dir)
-            rmtree(backup_dir)
-
-        # Crate backup dir
-        os.makedirs(backup_dir)
-
-        # Create mysql backup
-        backup_user = Utils.get_envvar_or_secret("MYSQL_BACKUP_USER")
-        backup_password = Utils.get_envvar_or_secret("MYSQL_BACKUP_PASSWORD")
-        xtrabackup = [Mysql.xtrabackup_binary, f"--user={backup_user}",
-                      f"--password={backup_password}", "--backup",
-                      f"--target-dir={backup_dir}"]
-
-        subprocess.run(xtrabackup, check=True)
-
-        # Prepare backup
-        xtrabackup_prepare = [Mysql.xtrabackup_binary, "--prepare",
-                              f"--target-dir={backup_dir}"]
-
-        subprocess.run(xtrabackup_prepare, check=True)
-        os.rename(backup_dir, current_dir);
-
-        logging.info("Backup was successfully created")
-
-    @staticmethod
-    def get_snapshot_time():
-        """
-        Get the snapshot time, if any is available.
+        Create a new backup if needed. Default age is 5m
         """
 
-        current_dir = "/snapshot/current"
+        from mcm.snapshot import Snapshot
 
-        if not os.path.exists(current_dir):
-            return None
-
-        time = os.path.getmtime(current_dir)
-        return time
-
-    @staticmethod
-    def create_backup_if_needed(maxage_seconds=60*15):
-        """
-        Create a new backup if needed. Default age is 15m
-        """
         logging.debug("Checking for backups")
 
         consul_client = Consul.get_instance()
@@ -403,13 +353,13 @@ class Mysql:
             logging.debug("We are not the replication master, skipping backup check")
             return False
 
-        backup_date = Mysql.get_snapshot_time()
+        backup_date = Snapshot.getTime()
 
         if Utils.is_refresh_needed(backup_date, timedelta(seconds=maxage_seconds)):
-            logging.info("Old backup is outdated (%s), creating new one", backup_date)
+            logging.info("Snapshot is outdated (%s), creating new one", backup_date)
 
             # Perform backup in extra thread to prevent Consul loop interruption
-            backup_thread = threading.Thread(target=Mysql.backup_data)
+            backup_thread = threading.Thread(target=Snapshot.create)
             backup_thread.start()
 
             return True
@@ -417,78 +367,13 @@ class Mysql:
         return False
 
     @staticmethod
-    def restore_backup():
-        """
-        Restore the latest MySQL dump from the S3 Bucket
-        """
-        logging.info("Restore MySQL Backup")
-        current_time = time.time()
-
-        if os.path.isfile(f"{Mysql.mysql_datadir}/ib_logfile0"):
-            logging.info("MySQL is already initialized, cleaning up first")
-            old_mysql_dir = f"{Mysql.mysql_datadir}_old_{current_time}"
-
-            os.mkdir(old_mysql_dir, 0o700)
-
-            # Renaming file per file, on some docker images
-            # the complete directory can not be moved
-            for entry in os.listdir(Mysql.mysql_datadir):
-                source_name = f"{Mysql.mysql_datadir}/{entry}"
-                dest_name = f"{old_mysql_dir}/{entry}"
-                logging.debug("Moving %s to %s", source_name, dest_name)
-                shutil.move(source_name, dest_name)
-
-            logging.info("Old MySQL data moved to: %s", old_mysql_dir)
-
-
-        backup_file, _ = Minio.get_latest_backup()
-
-        if backup_file is None:
-            logging.error("Unable to restore backup, no backup found in bucket")
-            return False
-
-        # Restore directory
-        restore_dir = f"/tmp/mysql_restore_{current_time}"
-
-        # Crate restore dir
-        os.makedirs(restore_dir)
-
-        # Download backup
-        mc_download = [Minio.minio_binary, "cp", f"backup/mysqlbackup/{backup_file}",
-                       restore_dir]
-        subprocess.run(mc_download, check=True)
-
-        # Unpack backup
-        tar = ["/bin/tar", "zxf", f"{restore_dir}/{backup_file}", "-C", restore_dir]
-        subprocess.run(tar, check=True)
-
-        # Ensure that this is a MySQL Backup
-        if not os.path.isfile(f"{restore_dir}/mysql/ib_logfile0"):
-            logging.error("Unpacked backup is not a MySQL backup")
-            rmtree(restore_dir)
-            return False
-
-        # Restore backup
-        xtrabackup = [Mysql.xtrabackup_binary, "--copy-back",
-                      f"--target-dir={restore_dir}/mysql"]
-        subprocess.run(xtrabackup, check=True)
-
-        # Change permissions of the restored data
-        chown = ['chown', 'mysql.mysql', '-R', '/var/lib/mysql/']
-        subprocess.run(chown, check=True)
-
-        # Remove old backup data
-        rmtree(restore_dir)
-        return True
-
-
-    @staticmethod
     def restore_backup_or_exit():
         """
         Restore a backup or exit
         """
+        from mcm.snapshot import Snapshot
 
-        result = Mysql.restore_backup()
+        result = Snapshot.restore()
 
         if not result:
             logging.error("Unable to restore MySQL backup")

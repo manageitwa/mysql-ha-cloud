@@ -3,7 +3,7 @@
 import os
 import time
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import netifaces
 
@@ -49,6 +49,9 @@ class Utils:
         """
         if last_execution is None:
             return True
+
+        if type(last_execution) is float:
+            last_execution = datetime.fromtimestamp(last_execution)
 
         return datetime.now() - last_execution > max_timedelta
 

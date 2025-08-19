@@ -7,4 +7,4 @@
 # Exit on error
 set -e
 
-./mysql_cluster_manager.py join_or_bootstrap --log-level DEBUG
+./mysql_cluster_manager.py join_or_bootstrap

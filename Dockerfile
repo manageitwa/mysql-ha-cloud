@@ -31,10 +31,8 @@ RUN \
     rpm -i /tmp/proxysql.rpm && \
     rm /tmp/proxysql.rpm && \
     # Create directories for Cluster Manager and snapshot
-    mkdir /snapshot && \
+    mkdir /snapshots && \
     mkdir /cluster && \
-    # chown 1000:1000 /snapshot && \
-    # chown 1000:1000 /cluster && \
     # Clean up
     microdnf clean all && \
     rm -rf /var/cache/yum/* && \
@@ -42,12 +40,11 @@ RUN \
     rm -rf /tmp/*
 
 # Install Cluster Manager and dependencies, and set up volume
-# USER 1000:1000
 WORKDIR /cluster
 
-# COPY --chown=1000:1000 mysql_cluster_manager/requirements .
-# COPY --chown=1000:1000 mysql_cluster_manager/src .
-# COPY --chown=1000:1000 entrypoint.sh .
+COPY mysql_cluster_manager/requirements .
+COPY mysql_cluster_manager/src .
+COPY entrypoint.sh .
 
 COPY mysql_cluster_manager/requirements .
 COPY mysql_cluster_manager/src .
@@ -57,6 +54,6 @@ COPY entrypoint.sh .
 ENV PYTHONUSERBASE=/cluster/.prefix
 RUN pip3 install --cache-dir /cluster/.cache --user -r requirements
 
-VOLUME /snapshot
-EXPOSE 6032/tcp
+VOLUME /snapshots
+EXPOSE 6032/tcp 6033/tcp
 CMD ["bash", "entrypoint.sh"]

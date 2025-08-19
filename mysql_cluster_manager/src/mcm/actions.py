@@ -60,7 +60,7 @@ class Actions:
             Mysql.restore_backup_or_exit()
         elif not replication_leader and not snapshotExists:
             logging.info("We are not the replication leader, waiting for backups")
-            snapshotExists = Utils.wait_for_backup_exists(Consul.get_instance())
+            snapshotExists = Snapshot.waitForSnapshot(Consul.get_instance())
 
             if not snapshotExists:
                 logging.error("No snapshot available, please check master logs or incomplete snapshot, exiting")

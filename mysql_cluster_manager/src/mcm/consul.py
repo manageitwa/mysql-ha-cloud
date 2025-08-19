@@ -59,7 +59,7 @@ class Consul:
     def get_instance():
         """ Static access method. """
         if Consul.__instance is None:
-            Consul()
+            return Consul()
 
         return Consul.__instance
 

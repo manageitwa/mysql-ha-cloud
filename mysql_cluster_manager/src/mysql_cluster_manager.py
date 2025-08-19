@@ -15,34 +15,18 @@ from mcm.utils import Utils
 
 parser = argparse.ArgumentParser(
     description="MySQL cluster manager",
-    epilog="For more info, please see: https://github.com/jnidzwetzki/mysql-ha-cloud"
-)
+    epilog="For more info, please see: https://github.com/jnidzwetzki/mysql-ha-cloud")
 
-AVAILABLE_OPERATIONS = (
-    'join_or_bootstrap',
-    'mysql_backup',
-    'mysql_restore',
-    'mysql_start',
-    'mysql_stop'
-)
-parser.add_argument(
-    'operation',
-    metavar = 'operation',
-    help = f'Operation to be executed ({AVAILABLE_OPERATIONS})'
-)
+AVAILABLE_OPERATIONS = ['join_or_bootstrap', 'mysql_backup', 'mysql_restore',
+                        'mysql_start','mysql_stop','mysql_autobackup',
+                        'proxysql_init']
 
-log_levels = (
-    'DEBUG',
-    'INFO',
-    'WARNING',
-    'ERROR',
-    'CRITICAL'
-)
 parser.add_argument(
-    '--log-level',
-    default = 'INFO',
-    choices = log_levels
-)
+    'operation', metavar = 'operation',
+    help = f'Operation to be executed ({AVAILABLE_OPERATIONS})')
+
+log_levels = ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
+parser.add_argument('--log-level', default = 'INFO',choices = log_levels)
 
 # Parse args
 args = parser.parse_args()
@@ -54,25 +38,17 @@ logging.basicConfig(
 )
 
 # Check for all needed env vars
-required_envvars = [
-    'CONSUL_BOOTSTRAP_SERVER'
-]
-required_envvars_or_secrets = [
-    'MYSQL_ROOT_PASSWORD',
-    'MYSQL_BACKUP_USER',
-    'MYSQL_BACKUP_PASSWORD',
-    'MYSQL_REPLICATION_USER',
-    'MYSQL_REPLICATION_PASSWORD',
-    'MYSQL_USER',
-    'MYSQL_PASSWORD'
-]
+required_envvars = ['CONSUL_BOOTSTRAP_SERVER']
+required_envvars_or_secrets = ['MYSQL_ROOT_PASSWORD', 'MYSQL_BACKUP_USER',
+                               'MYSQL_BACKUP_PASSWORD',
+                               'MYSQL_REPLICATION_USER',
+                               'MYSQL_REPLICATION_PASSWORD','MYSQL_USER',
+                               'MYSQL_PASSWORD']
 
 for required_var in required_envvars:
     if not required_var in os.environ:
-        logging.error(
-            "Missing required environment variable \"%s\"",
-            required_var
-        )
+        logging.error("Missing required environment variable \"%s\"",
+                      required_var)
         sys.exit(1)
 
 for required_var in required_envvars_or_secrets:
@@ -83,8 +59,7 @@ for required_var in required_envvars_or_secrets:
             "Missing required environment variable \"%s\" - please define environment variable \"%s\" or environment file \"%s\"_FILE",
             required_var,
             required_var,
-            required_var
-        )
+            required_var)
         sys.exit(1)
 
 # Perform operations

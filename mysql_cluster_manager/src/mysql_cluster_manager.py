@@ -39,18 +39,11 @@ logging.basicConfig(
 )
 
 # Check for all needed env vars
-required_envvars = ['CONSUL_BOOTSTRAP_SERVER']
 required_envvars_or_secrets = ['MYSQL_ROOT_PASSWORD', 'MYSQL_BACKUP_USER',
                                'MYSQL_BACKUP_PASSWORD',
                                'MYSQL_REPLICATION_USER',
                                'MYSQL_REPLICATION_PASSWORD','MYSQL_USER',
                                'MYSQL_PASSWORD']
-
-for required_var in required_envvars:
-    if not required_var in os.environ:
-        logging.error("Missing required environment variable \"%s\"",
-                      required_var)
-        sys.exit(1)
 
 for required_var in required_envvars_or_secrets:
     try:

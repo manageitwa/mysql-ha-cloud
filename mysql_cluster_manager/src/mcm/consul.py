@@ -24,7 +24,7 @@ class Consul:
     __instance = None
 
     # Retry counter for operations
-    retry_counter = 100
+    retry_counter = 30
 
     # KV prefix
     kv_prefix = "mcm/"
@@ -50,7 +50,7 @@ class Consul:
 
         Consul.__instance = self
         logging.info("Register Consul connection")
-        for _ in range(12):
+        for _ in range(Consul.retry_counter):
             try:
                 self.client = pyconsul.Consul()
             except:
@@ -114,7 +114,7 @@ class Consul:
 
         session = None
 
-        for _ in range(12):
+        for _ in range(Consul.retry_counter):
             try:
                 session = self.create_session(
                     name=Consul.instances_session_key,
@@ -134,19 +134,27 @@ class Consul:
         Get all registered MySQL nodes
         """
         mysql_nodes = []
-        result = self.client.kv.get(Consul.instances_path, recurse=True)
 
-        if result[1] is not None:
-            for node in result[1]:
-                node_value = node['Value']
-                node_data = json.loads(node_value)
+        for _ in range(Consul.retry_counter):
+            try:
+                result = self.client.kv.get(Consul.instances_path, recurse=True)
 
-                if not "ip_address" in node_data:
-                    logging.error("ip_address missing in %s", node)
-                    continue
+                if result[1] is not None:
+                    for node in result[1]:
+                        node_value = node['Value']
+                        node_data = json.loads(node_value)
 
-                ip_address = node_data["ip_address"]
-                mysql_nodes.append(ip_address)
+                        if not "ip_address" in node_data:
+                            logging.error("ip_address missing in %s", node)
+                            continue
+
+                        ip_address = node_data["ip_address"]
+                        mysql_nodes.append(ip_address)
+
+                return mysql_nodes
+            except:
+                logging.warning("Unable to get registered nodes from Consul, retrying in 10 seconds")
+                time.sleep(10)
 
         return mysql_nodes
 
@@ -159,45 +167,46 @@ class Consul:
           * If Key not exists, try to create
         """
         for _ in range(Consul.retry_counter):
-            result = self.client.kv.get(Consul.kv_server_id)
+            try:
+                result = self.client.kv.get(Consul.kv_server_id)
 
-            # Create new key
-            if result[1] is None:
-                logging.debug("Old serverkey %s not found, preparing new one",
-                              Consul.kv_server_id)
+                # Create new key
+                if result[1] is None:
+                    logging.debug("Old serverkey %s not found, preparing new one",
+                                Consul.kv_server_id)
 
-                json_string = json.dumps({'last_used_id': 1})
+                    json_string = json.dumps({'last_used_id': 1})
 
-                # Try to create
-                put_result = self.client.kv.put(Consul.kv_server_id, json_string, cas=0)
+                    # Try to create
+                    put_result = self.client.kv.put(Consul.kv_server_id, json_string, cas=0)
+                    if put_result is True:
+                        logging.debug("Created new key, started new server counter")
+                        return 1
+
+                    logging.debug("New key could not be created, retrying")
+                    continue
+
+                # Updating existing key
+                logging.debug("Updating existing key %s", result)
+                json_string = result[1]['Value']
+                version = result[1]['ModifyIndex']
+                server_data = json.loads(json_string)
+
+                if not "last_used_id" in server_data:
+                    logging.error("Invalid JSON returned (missing last_used_id) %s",
+                                json_string)
+
+                server_data['last_used_id'] = server_data['last_used_id'] + 1
+                json_string = json.dumps(server_data)
+                put_result = self.client.kv.put(Consul.kv_server_id, json_string, cas=version)
+
                 if put_result is True:
-                    logging.debug("Created new key, started new server counter")
-                    return 1
-
-                logging.debug("New key could not be created, retrying")
-                continue
-
-            # Updating existing key
-            logging.debug("Updating existing key %s", result)
-            json_string = result[1]['Value']
-            version = result[1]['ModifyIndex']
-            server_data = json.loads(json_string)
-
-            if not "last_used_id" in server_data:
-                logging.error("Invalid JSON returned (missing last_used_id) %s",
-                              json_string)
-
-            server_data['last_used_id'] = server_data['last_used_id'] + 1
-            json_string = json.dumps(server_data)
-            put_result = self.client.kv.put(Consul.kv_server_id, json_string, cas=version)
-
-            if put_result is True:
-                logging.debug("Successfully updated consul value %s, new server_id is %i",
-                              put_result, server_data['last_used_id'])
-                return server_data['last_used_id']
-
-            logging.debug("Unable to update consul value, retrying %s", put_result)
-            time.sleep(10)
+                    logging.debug("Successfully updated consul value %s, new server_id is %i",
+                                put_result, server_data['last_used_id'])
+                    return server_data['last_used_id']
+            except:
+                logging.debug("Unable to get MYSQL server ID, retrying in 10 seconds")
+                time.sleep(10)
 
         raise Exception("Unable to determine server id")
 
@@ -206,62 +215,84 @@ class Consul:
         Test if this is the MySQL replication leader or not
         """
 
-        result = self.client.kv.get(Consul.replication_leader_path)
+        for _ in range(Consul.retry_counter):
+            try:
+                result = self.client.kv.get(Consul.replication_leader_path)
 
-        if result[1] is None:
-            logging.debug("No replication leader node available")
-            return False
+                if result[1] is None:
+                    logging.debug("No replication leader node available")
+                    return False
 
-        leader_session = result[1]['Session']
+                leader_session = result[1]['Session']
 
-        logging.debug("Replication leader is %s, we are %s",
-                      leader_session, self.node_health_session)
+                logging.debug("Replication leader is %s, we are %s",
+                            leader_session, self.node_health_session)
 
-        return leader_session == self.node_health_session
+                return leader_session == self.node_health_session
+            except:
+                logging.warning("Unable to determine replication leader from Consul, retrying in 10 seconds")
+                time.sleep(10)
+
+        return False
 
     def get_replication_leader_ip(self):
         """
         Get the IP of the current replication ledear
         """
-        result = self.client.kv.get(Consul.replication_leader_path)
 
-        if result[1] is None:
-            return None
+        for _ in range(Consul.retry_counter):
+            try:
+                result = self.client.kv.get(Consul.replication_leader_path)
 
-        json_string = result[1]['Value']
-        server_data = json.loads(json_string)
+                if result[1] is None:
+                    return None
 
-        if not "ip_address" in server_data:
-            logging.error("Invalid JSON returned from replication ledader (missing server_id) %s",
-                          json_string)
+                json_string = result[1]['Value']
+                server_data = json.loads(json_string)
 
-        return server_data['ip_address']
+                if not "ip_address" in server_data:
+                    logging.error("Invalid JSON returned from replication ledader (missing server_id) %s",
+                                json_string)
+
+                return server_data['ip_address']
+            except:
+                logging.warning("Unable to get replication leader IP from Consul, retrying in 10 seconds")
+                time.sleep(10)
+
+        return None
 
     def try_to_become_replication_leader(self):
         """
-        Try to get the new replication leader
+        Try to become the new replication leader
         """
 
-        result = self.client.kv.get(Consul.replication_leader_path)
+        for _ in range(Consul.retry_counter):
+            try:
+                result = self.client.kv.get(Consul.replication_leader_path)
 
-        if result[1] is None:
-            logging.debug("Register MySQL instance in Consul")
-            ip_address = Consul.getLocalIp()
+                if result[1] is None:
+                    logging.debug("Register MySQL instance in Consul")
+                    ip_address = Consul.getLocalIp()
 
-            json_string = json.dumps({
-                'ip_address': ip_address
-            })
+                    json_string = json.dumps({
+                        'ip_address': ip_address
+                    })
 
-            put_result = self.client.kv.put(Consul.replication_leader_path,
-                                            json_string,
-                                            acquire=self.node_health_session)
+                    put_result = self.client.kv.put(Consul.replication_leader_path,
+                                                    json_string,
+                                                    acquire=self.node_health_session)
 
-            if put_result:
-                logging.info("We are the new replication leader")
-            else:
-                logging.debug("Unable to become replication leader, retry")
+                    if put_result:
+                        logging.info("We are the new replication leader")
+                    else:
+                        logging.debug("Unable to become replication leader, retry")
 
-            return put_result
+                    return put_result
+
+                return False
+            except:
+                logging.warning("Unable to become replication leader due to error communicating with Consul, retrying in 10 seconds")
+                time.sleep(10)
 
         return False
 
@@ -270,51 +301,70 @@ class Consul:
         """
         Register the MySQL primary service
         """
-        ip_address = Consul.getLocalIp()
 
-        tags = []
-        service_id = f"mysql_{ip_address}"
+        for _ in range(Consul.retry_counter):
+            try:
+                ip_address = Consul.getLocalIp()
 
-        if leader:
-            tags.append("leader")
-        else:
-            tags.append("follower")
+                tags = []
+                service_id = f"mysql_{ip_address}"
 
-        # Unrregister old service
-        all_services = self.client.agent.services()
+                if leader:
+                    tags.append("leader")
+                else:
+                    tags.append("follower")
 
-        if service_id in all_services:
-            logging.debug("Unregister old service %s (%s)", service_id, all_services)
-            self.client.agent.service.deregister(service_id)
+                # Unrregister old service
+                all_services = self.client.agent.services()
 
-        # Register new service
-        logging.info("Register new service_id=%s, tags=%s", service_id, tags)
-        self.client.agent.service.register("mysql", service_id=service_id, port=port, tags=tags)
+                if service_id in all_services:
+                    logging.debug("Unregister old service %s (%s)", service_id, all_services)
+                    self.client.agent.service.deregister(service_id)
+
+                # Register new service
+                logging.info("Register new service_id=%s, tags=%s", service_id, tags)
+                self.client.agent.service.register("mysql", service_id=service_id, port=port, tags=tags)
+
+                return True
+            except:
+                logging.warning("Unable to register service in Consul, retrying in 10 seconds")
+                time.sleep(10)
+
+        return False
 
     def register_node(self, mysql_version=None, server_id=None):
         """
         Register the node in Consul
         """
-        logging.debug("Register MySQL instance in Consul")
-        ip_address = Consul.getLocalIp()
 
-        json_string = json.dumps({
-            'ip_address': ip_address,
-            'server_id': server_id,
-            'mysql_version': mysql_version
-        })
+        for _ in range(Consul.retry_counter):
+            try:
+                logging.debug("Register MySQL instance in Consul")
+                ip_address = Consul.getLocalIp()
 
-        path = f"{Consul.instances_path}{ip_address}"
-        logging.debug("Consul: Path %s, value %s (session %s)",
-                      path, json_string, self.node_health_session)
+                json_string = json.dumps({
+                    'ip_address': ip_address,
+                    'server_id': server_id,
+                    'mysql_version': mysql_version
+                })
 
-        put_result = self.client.kv.put(path, json_string, acquire=self.node_health_session)
+                path = f"{Consul.instances_path}{ip_address}"
+                logging.debug("Consul: Path %s, value %s (session %s)",
+                            path, json_string, self.node_health_session)
 
-        if not put_result:
-            logging.error("Unable to create %s", path)
-            return False
+                put_result = self.client.kv.put(path, json_string, acquire=self.node_health_session)
 
-        return True
+                if not put_result:
+                    logging.error("Unable to create %s", path)
+                    return False
+
+                return True
+            except:
+                logging.warning("Unable to register node in Consul, retrying in 10 seconds")
+                time.sleep(10)
+
+        logging.error("Unable to create register node")
+        return False
 
     def refresh_sessions(self):
         """
@@ -324,7 +374,16 @@ class Consul:
 
         for session in self.active_sessions:
             logging.debug("Refreshing session %s", session)
-            self.client.session.renew(session)
+
+            for _ in range(Consul.retry_counter):
+                try:
+                    self.client.session.renew(session)
+                    break
+                except:
+                    logging.warning("Unable to refresh session %s, retrying in 10 seconds", session)
+                    time.sleep(10)
+                    continue
+
 
     def create_session(self, name, behavior='release', ttl=None, lock_delay=15):
         """
@@ -334,17 +393,24 @@ class Consul:
         see https://github.com/hashicorp/consul/issues/1172
         """
 
-        session_id = self.client.session.create(name=name,
-                                                behavior=behavior,
-                                                ttl=ttl,
-                                                lock_delay=lock_delay)
+        for _ in range(Consul.retry_counter):
+            try:
+                session_id = self.client.session.create(name=name,
+                                                        behavior=behavior,
+                                                        ttl=ttl,
+                                                        lock_delay=lock_delay)
 
-        # Keep session for auto refresh
-        self.active_sessions.append(session_id)
+                # Keep session for auto refresh
+                self.active_sessions.append(session_id)
 
-        logging.debug("Created new session on node %s named %s", name, session_id)
+                logging.debug("Created new session on node %s named %s", name, session_id)
 
-        return session_id
+                return session_id
+            except:
+                logging.warning("Unable to create session %s, retrying in 10 seconds", name)
+                time.sleep(10)
+
+        return None
 
 
     def destroy_session(self, session_id):
@@ -355,8 +421,15 @@ class Consul:
         if not session_id in self.active_sessions:
             return False
 
-        self.active_sessions.remove(session_id)
-        self.client.session.destroy(session_id)
+        for _ in range(Consul.retry_counter):
+            try:
+                self.active_sessions.remove(session_id)
+                self.client.session.destroy(session_id)
+                break
+            except:
+                logging.warning("Unable to destroy session %s, retrying in 10 seconds", session_id)
+                time.sleep(10)
+                continue
 
         return True
 

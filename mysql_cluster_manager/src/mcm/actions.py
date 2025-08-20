@@ -149,7 +149,8 @@ class Actions:
                     real_leader = Consul.get_instance().get_replication_leader_ip()
                     configured_leader = Mysql.get_replication_leader_ip()
 
-                    if real_leader != configured_leader:
+                    if (real_leader is not None and
+                        real_leader != configured_leader):
                         logging.info("Replication leader change (old=%s, new=%s)", configured_leader, real_leader)
                         Mysql.change_to_replication_client(real_leader)
 

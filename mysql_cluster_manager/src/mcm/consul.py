@@ -1,12 +1,15 @@
 """This file is part of the MySQL cluster manager"""
 
 import os
+import sys
 import time
 import json
 import logging
 import threading
 import subprocess
+import socket
 
+import netifaces
 import consul as pyconsul
 
 from mcm.utils import Utils
@@ -243,7 +246,7 @@ class Consul:
 
         if result[1] is None:
             logging.debug("Register MySQL instance in Consul")
-            ip_address = Utils.get_local_ip_address()
+            ip_address = Consul.getLocalIp()
 
             json_string = json.dumps({
                 'ip_address': ip_address
@@ -267,7 +270,7 @@ class Consul:
         """
         Register the MySQL primary service
         """
-        ip_address = Utils.get_local_ip_address()
+        ip_address = Consul.getLocalIp()
 
         tags = []
         service_id = f"mysql_{ip_address}"
@@ -293,7 +296,7 @@ class Consul:
         Register the node in Consul
         """
         logging.debug("Register MySQL instance in Consul")
-        ip_address = Utils.get_local_ip_address()
+        ip_address = Consul.getLocalIp()
 
         json_string = json.dumps({
             'ip_address': ip_address,
@@ -368,12 +371,12 @@ class Consul:
         consul_args.append("-data-dir")
         consul_args.append("/tmp/consul")
 
-        consul_server = Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_SERVER", "mysql")
-        consul_interface = Utils.get_envvar_or_secret("CONSUL_BIND_INTERFACE", "eth0")
-        consul_expect = Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_EXPECT", "3")
+        if Consul.getLocalIp() is None:
+            logging.error("Unable to determine local IP address, cannot start Consul agent")
+            sys.exit(1)
 
         consul_args.append("-bind")
-        consul_args.append(f'{{{{ GetInterfaceIP "{consul_interface}" }}}}')
+        consul_args.append(Consul.getLocalIp())
 
         consul_args.append("-client")
         consul_args.append("0.0.0.0");
@@ -381,10 +384,10 @@ class Consul:
         consul_args.append("-server")
 
         consul_args.append("-retry-join")
-        consul_args.append(consul_server)
+        consul_args.append(f'tasks.{Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_SERVICE", "mysql")}')
 
         consul_args.append("-bootstrap-expect")
-        consul_args.append(consul_expect)
+        consul_args.append(Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_EXPECT", "3"))
 
         if (Utils.get_envvar_or_secret("CONSUL_ENABLE_UI", "false").lower() == "true" or
             Utils.get_envvar_or_secret("CONSUL_ENABLE_UI", "false") == "1"):
@@ -399,3 +402,22 @@ class Consul:
         time.sleep(1)
 
         return consul_process
+
+    @staticmethod
+    def getLocalIp():
+        """
+        Get the local IP, based on the service being bootstrapped
+        """
+        ip_addresses = socket.gethostbyname_ex(
+            f'tasks.{Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_SERVICE", "mysql")}')[2]
+
+        for interface in netifaces.interfaces():
+            if interface == 'lo':
+                continue
+
+            for addressInfo in netifaces.ifaddresses(interface)[netifaces.AF_INET]:
+                if addressInfo['addr'] in ip_addresses:
+                    logging.debug("Found local IP %s on interface %s", addressInfo['addr'], interface)
+                    return addressInfo['addr']
+
+        return None

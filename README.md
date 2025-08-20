@@ -20,6 +20,17 @@ A couple of changes have been made to this fork compared to the original project
 - Consul is no longer required as a separate service, as the embedded Consul CLI is now used as a server agent in each node. The resolution of the DNS is handled internally.
 - The image is now based on the official MySQL 8.4 image, which is based on Oracle Linux 9 as opposed to Debian Bookworm.
 - Support for Docker secrets has been introduced - nearly all environment variables can be suffixed with `_FILE` to read from a file instead of passing the value directly.
+- Some environment variables have been dropped, and others have been renamed. Please see environment variables defined below.
+
+## Environment variables
+
+The following environment variables are used to configure this service.
+
+| Variable                   | Required | Default   | Description                                                                                                                                                                                                                                                                                           |
+| -------------------------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CONSUL_BOOTSTRAP_SERVICE` | No       | `"mysql"` | The name of the service to bootstrap the Consul agent for. This should match your service name.                                                                                                                                                                                                       |
+| `CONSUL_BOOTSTRAP_EXPECT`  | No       | `"3"`     | The number of instances to expect in the cluster in order for Consul to bootstrap. We have set this to 3 by default for failover, and should be used as a minimum. This _does not_ have to match your number of replicas, as long as your number of replicas is greater than or equal to this number. |
+| `CONSUL_ENABLE_UI`         | No       | `"false"` | If `"true"` or `1`, the Consul UI will be enabled. This may reveal information about your cluster, so only enable it if you can secure it.                                                                                                                                                            |
 
 ## Notes and FAQ
 

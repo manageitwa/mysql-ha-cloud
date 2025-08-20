@@ -31,6 +31,10 @@ services:
       - ./entrypoint.sh:/cluster/entrypoint.sh
     deploy:
       replicas: 3
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+        max_attempts: 5
     ports:
       - 6033:6032
       - 3306:6033

@@ -3,6 +3,7 @@
 import sys
 import time
 import logging
+import subprocess
 
 from datetime import timedelta, datetime
 
@@ -14,6 +15,9 @@ from mcm.snapshot import Snapshot
 
 class Actions:
     """The actions of the application"""
+
+    consul_process = None
+    mysql_process = None
 
     @staticmethod
     def join_or_bootstrap():
@@ -167,3 +171,23 @@ class Actions:
                 Consul.get_instance().stop_session_auto_refresh_thread()
 
             time.sleep(1)
+
+    @staticmethod
+    def terminate_handler(signum):
+        """
+        Termination handler for the main event loop
+        """
+
+        logging.info("Received signal %s, terminating...", signum)
+
+        # Leave cluster and stop the consul agent
+        if Actions.consul_process is not None:
+            subprocess.run(['consul', 'leave'])
+
+            Actions.consul_process.terminate()
+
+        # Stop the MySQL server
+        if Actions.mysql_process is not None:
+            Mysql.server_stop()
+
+        sys.exit(0)

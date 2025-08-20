@@ -2,10 +2,10 @@
 
 """This file is part of the MySQL cluster manager"""
 
-import os
 import sys
 import logging
 import argparse
+import signal
 
 from mcm.actions import Actions
 from mcm.consul import Consul
@@ -58,6 +58,8 @@ for required_var in required_envvars_or_secrets:
 
 # Perform operations
 if args.operation == 'join_or_bootstrap':
+    signal.signal(signal.SIGINT, Actions.terminate_handler)
+    signal.signal(signal.SIGTERM, Actions.terminate_handler)
     Actions.join_or_bootstrap()
 elif args.operation == 'mysql_backup':
     Snapshot.create()

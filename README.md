@@ -16,6 +16,7 @@ This project is a fork of the excellent [MySQL-HA-Cloud](https://github.com/jnid
 A couple of changes have been made to this fork compared to the original project:
 
 - MinIO storage of backups has been removed entirely from this project and atomic snapshotting is now used. ([See notes](#notes-and-faq))
+- Consul is no longer required as a separate service, as the embedded Consul CLI is now used as a server agent in each node. This has improved reliability of the communication between nodes, but does mean that it restricts each node to having only one container of this image running on it, as Consul requires host networking to function correctly.
 - The image is now based on the official MySQL 8.4 image, which is based on Oracle Linux 9 as opposed to Debian Bookworm.
 - Support for Docker secrets has been introduced - nearly all environment variables can be suffixed with `_FILE` to read from a file instead of passing the value directly.
 

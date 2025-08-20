@@ -47,7 +47,17 @@ class Consul:
 
         Consul.__instance = self
         logging.info("Register Consul connection")
-        self.client = pyconsul.Consul()
+        for _ in range(12):
+            try:
+                self.client = pyconsul.Consul()
+            except:
+                logging.warning("Unable to connect to Consul, retrying in 10 seconds")
+                time.sleep(10)
+                continue
+
+        if not self.client:
+            raise Exception("Unable to establish a connection with Consul")
+
         self.active_sessions = []
         self.node_health_session = self.create_node_health_session()
 
@@ -108,8 +118,9 @@ class Consul:
                     behavior='delete', ttl=15, lock_delay=0)
 
                 return session
-            except pyconsul.exceptions.ConsulException as e:
-                time.sleep(5)
+            except:
+                logging.warning("Unable to create a session in Consul, retrying in 10 seconds")
+                time.sleep(10)
 
         if session is None:
             raise Exception("Unable to create node health session")
@@ -359,7 +370,7 @@ class Consul:
 
         consul_server = Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_SERVER", "mysql")
         consul_interface = Utils.get_envvar_or_secret("CONSUL_BIND_INTERFACE", "eth0")
-        consul_expect = Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_EXPECT", "1")
+        consul_expect = Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_EXPECT", "3")
 
         consul_args.append("-bind")
         consul_args.append(f'{{{{ GetInterfaceIP "{consul_interface}" }}}}')

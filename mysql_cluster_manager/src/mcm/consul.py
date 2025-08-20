@@ -99,9 +99,21 @@ class Consul:
         on session destory.
         """
 
-        return self.create_session(
-            name=Consul.instances_session_key,
-            behavior='delete', ttl=15, lock_delay=0)
+        session = None
+
+        for _ in range(12):
+            try:
+                session = self.create_session(
+                    name=Consul.instances_session_key,
+                    behavior='delete', ttl=15, lock_delay=0)
+
+                return session
+            except pyconsul.exceptions.ConsulException as e:
+                time.sleep(5)
+
+        if session is None:
+            raise Exception("Unable to create node health session")
+
 
     def get_all_registered_nodes(self):
         """
@@ -342,20 +354,30 @@ class Consul:
         logging.info("Starting Consul Agent")
         consul_args = ["consul"]
         consul_args.append("agent")
-        consul_args.append("--data-dir")
+        consul_args.append("-data-dir")
         consul_args.append("/tmp/consul")
 
-        consul_seed = Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_SERVER")
-        consul_interface = Utils.get_envvar_or_secret("MCM_BIND_INTERFACE", "eth0")
+        consul_server = Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_SERVER", "mysql")
+        consul_interface = Utils.get_envvar_or_secret("CONSUL_BIND_INTERFACE", "eth0")
+        consul_expect = Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_EXPECT", "1")
 
-        consul_args.append("--bind")
+        consul_args.append("-bind")
         consul_args.append(f'{{{{ GetInterfaceIP "{consul_interface}" }}}}')
 
-        consul_args.append("--client")
+        consul_args.append("-client")
         consul_args.append("0.0.0.0");
 
-        consul_args.append("--retry-join")
-        consul_args.append(consul_seed)
+        consul_args.append("-server")
+
+        consul_args.append("-retry-join")
+        consul_args.append(consul_server)
+
+        consul_args.append("-bootstrap-expect")
+        consul_args.append(consul_expect)
+
+        if (Utils.get_envvar_or_secret("CONSUL_ENABLE_UI", "false").lower() == "true" or
+            Utils.get_envvar_or_secret("CONSUL_ENABLE_UI", "false") == "1"):
+            consul_args.append("-ui")
 
         logging.info("Consul args: %s", consul_args)
 

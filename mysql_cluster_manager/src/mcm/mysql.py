@@ -187,10 +187,11 @@ class Mysql:
             logging.error("Invalid output, Replica_IO_State not found %s", slave_status)
             return False
 
-        # Leader is sending data
+        # Check that leader is connected and we're waiting for events, or is disconnected
         io_state = slave_status[0]['Replica_IO_State']
         logging.debug("Follower IO state is '%s'", io_state)
-        if io_state != "Waiting for master to send event":
+        if (io_state != "Waiting for master to send event"
+            and io_state != "Reconnecting after a failed source event read"):
             return False
 
         if not 'Replica_SQL_Running_State' in slave_status[0]:

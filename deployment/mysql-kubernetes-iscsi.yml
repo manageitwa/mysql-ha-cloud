@@ -1,3 +1,6 @@
+# WARNING: This file was inherited from the original project. I have no idea if it works now.
+# Please see the Notes & FAQ section in the README.md for more information.
+
 apiVersion: v1
 kind: Secret
 metadata:
@@ -9,10 +12,10 @@ data:
   node.session.auth.username: bXl1c2VyLWluY29taW5n
   node.session.auth.password: bXlwYXNzMQ==
 
---- 
+---
 
 apiVersion: apps/v1
-kind: Deployment 
+kind: Deployment
 metadata:
   name: minio
 spec:
@@ -28,8 +31,8 @@ spec:
     spec:
       containers:
       - name: minio
-        image: minio/minio:RELEASE.2020-10-18T21-54-12Z 
-        args: 
+        image: minio/minio:RELEASE.2020-10-18T21-54-12Z
+        args:
            - server
            - /data
         env:
@@ -71,7 +74,7 @@ kind: Service
 metadata:
   name: minio
 spec:
-  type: NodePort 
+  type: NodePort
   ports:
     - port: 9000
       targetPort: 9000
@@ -90,7 +93,7 @@ metadata:
   labels:
     app: consul
 spec:
-  type: NodePort 
+  type: NodePort
   ports:
     - port: 8500
       targetPort: 8500
@@ -111,7 +114,7 @@ spec:
     matchLabels:
       app: consul # has to match .spec.template.metadata.labels
   serviceName: "consul"
-  replicas: 3 
+  replicas: 3
   template:
     metadata:
       labels:
@@ -121,19 +124,19 @@ spec:
       containers:
       - name: consul
         image: consul:1.9
-        args: 
-           - agent 
+        args:
+           - agent
            - -ui
            - -data-dir
-           - /consul/data 
-           - -server 
-           - -client 
-           - 0.0.0.0 
-           - -retry-join 
+           - /consul/data
+           - -server
+           - -client
+           - 0.0.0.0
+           - -retry-join
            - consul-0.consul
-           - -retry-join 
+           - -retry-join
            - consul-1.consul
-           - -retry-join 
+           - -retry-join
            - consul-2.consul
            - -bootstrap-expect=3
         ports:
@@ -150,7 +153,7 @@ spec:
     matchLabels:
       app: mysql # has to match .spec.template.metadata.labels
   serviceName: "mysql"
-  replicas: 3 
+  replicas: 3
   template:
     metadata:
       labels:
@@ -159,16 +162,16 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
       - name: mysql
-        image: jnidzwetzki/mysql-ha-cloud:latest 
+        image: jnidzwetzki/mysql-ha-cloud:latest
         ports:
         - containerPort: 3306
           name: mysql
         - containerPort: 6032
           name: sqlproxy
         env:
-        - name: CONSUL_BIND_INTERFACE 
+        - name: CONSUL_BIND_INTERFACE
           value: eth0
-        - name: CONSUL_BOOTSTRAP_SERVER 
+        - name: CONSUL_BOOTSTRAP_SERVER
           value: "consul-0.consul"
         - name: MINIO_ACCESS_KEY
           value: minio
@@ -202,7 +205,7 @@ metadata:
   labels:
     app: mysql
 spec:
-  type: NodePort 
+  type: NodePort
   ports:
     - port: 3306
       targetPort: 3306

@@ -4,12 +4,9 @@ networks:
 
 services:
   mysql:
-    image: manageitwa/mysql-ha-cloud:dev
-    build: .
+    image: ghcr.io/manageitwa/mysql-ha-cloud:latest
     environment:
-      CONSUL_BOOTSTRAP_SERVICE: mysql
       CONSUL_BOOTSTRAP_EXPECT: 3
-      CONSUL_ENABLE_UI: "true"
 
       # Obviously, don't use these in production
       MYSQL_ROOT_PASSWORD: root_pass
@@ -26,9 +23,10 @@ services:
       mysql-ha:
     volumes:
       - ./snapshots:/snapshots
-      - ./mysql_cluster_manager/src/mcm:/cluster/mcm
-      - ./mysql_cluster_manager/src/mysql_cluster_manager.py:/cluster/mysql_cluster_manager.py
-      - ./entrypoint.sh:/cluster/entrypoint.sh
+      # For development only:
+      #- ./mysql_cluster_manager/src/mcm:/cluster/mcm
+      #- ./mysql_cluster_manager/src/mysql_cluster_manager.py:/cluster/mysql_cluster_manager.py
+      #- ./entrypoint.sh:/cluster/entrypoint.sh
     deploy:
       replicas: 3
       restart_policy:

@@ -340,9 +340,9 @@ class Mysql:
             return False
 
     @staticmethod
-    def create_backup_if_needed(maxage_seconds=60*5):
+    def create_backup_if_needed():
         """
-        Create a new backup if needed. Default age is 5m
+        Create a new backup if needed. Default age is 15m
         """
 
         from mcm.snapshot import Snapshot
@@ -355,6 +355,9 @@ class Mysql:
             return False
 
         backup_date = Snapshot.getTime()
+        maxage_seconds = int(Utils.get_envvar_or_secret("SNAPSHOT_MINUTES", 15)) * 60
+        if (maxage_seconds < 60):
+            maxage_seconds = 60
 
         if Utils.is_refresh_needed(backup_date, timedelta(seconds=maxage_seconds)):
             logging.info("Snapshot is outdated (%s), creating new one", backup_date)

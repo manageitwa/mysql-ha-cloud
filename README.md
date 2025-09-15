@@ -37,6 +37,7 @@ The following environment variables are used to configure this service.
 | `CONSUL_BOOTSTRAP_SERVICE` | No | `"mysql"` | The name of the service to bootstrap the Consul agent for. This should match your service name. |
 | `CONSUL_BOOTSTRAP_EXPECT` | No | `"3"` | The number of instances to expect in the cluster in order for Consul to bootstrap. We have set this to 3 by default for failover, and should be used as a minimum. This _does not_ have to match your number of replicas, as long as your number of replicas is greater than or equal to this number. |
 | `CONSUL_ENABLE_UI` | No | `"false"` | If `"true"` or `1`, the Consul UI will be enabled. This may reveal information about your cluster, so only enable it if you can secure it. |
+| `SNAPSHOT_MINUTES` | No | `15` | Define the interval (in minutes) for snapshots to occur. |
 | `MYSQL_ROOT_PASSWORD` | **Yes** | *None* | Defines the root password assigned to all nodes. This must be specified in order for nodes to be bootstrapped. It is recommended that you use a secret to provide this value. |
 | `MYSQL_USER` | **Yes** | *None* | Defines a username that will be created on initialisation. |
 | `MYSQL_PASSWORD` | **Yes** | *None* | Defines the password for the `MYSQL_USER` account. It is recommended that you use a secret to provide this value. |
@@ -59,7 +60,7 @@ Each node running this image contains the following:
 - A Consul 1.21 agent running in server mode
 - ProxySQL 3.0.2 installed
 - The contents of this repo's `mysql_cluster_manager` directory, acting as a Python 3 entrypoint/daemon.
-- A `snapshots` folder that contains the current snapshot of the database. This is a full [XtraBackup](https://www.percona.com/mysql/software/percona-xtrabackup) snapshot of the database, at most, 5 minutes old.
+- A `snapshots` folder that contains the current snapshot of the database. This is a full [XtraBackup](https://www.percona.com/mysql/software/percona-xtrabackup) snapshot of the database.
 
 It is expected that at least 3 nodes are made available as part of this service to provide a tolerance of 1 lost node. Each node can become a MySQL leader and/or a [Consul](https://developer.hashicorp.com/consul) leader, making all other nodes a follower for each service. These nodes must be connected to the same overlay network in order to communicate with one another. Consul acts as the "source of truth" for the purposes of determining available MySQL nodes and defining which MySQL node is the leader.
 
@@ -67,7 +68,7 @@ The MySQL leader node becomes a MySQL "read-write" node, with all writes being m
 
 The standard MySQL port `3306` is routed to [ProxySQL](https://proxysql.com/), which is installed on each node and is kept appraised of the layout of the network and routes read and write queries accordingly. This means that each node can receive SQL queries and they will be routed to the correct node, allowing you to load balance the servers (either with Docker's replica capabilities, or externally) and enacts the failover capability. If a node goes down, the Consul network will inform the daemon on each node to remove the lost node from ProxySQL on that node so that the remaining nodes will no longer route queries to the lost node.
 
-The snapshots are a point-in-time backup of the database, run every 5 minutes. These are used to bootstrap any new nodes that are added as replicas of the leader, and can also be used to recover the cluster entirely if it brought down. These snapshots are atomic - only one server will be able to replace the snapshot, and the current snapshot is not overwritten unless the snapshot completes successfully. To re-initialise the cluster from scratch, you only need to bring down the cluster and delete the snapshot.
+The snapshots are a point-in-time backup of the database, run every 15 minutes by default. These are used to bootstrap any new nodes that are added as replicas of the leader, and can also be used to recover the cluster entirely if it brought down. These snapshots are atomic - only one server will be able to replace the snapshot, and the current snapshot is not overwritten unless the snapshot completes successfully. To re-initialise the cluster from scratch, you only need to bring down the cluster and delete the snapshot.
 
 ## Notes and FAQ
 
@@ -78,6 +79,6 @@ The snapshots are a point-in-time backup of the database, run every 5 minutes. T
 - **Why was the MinIO storage removed?** \
   From our usage of the original project for a number of years (even in beta!), we found that the MinIO storage, whilst doing what it was intended to do, added additional storage considerations and complexity that we felt were not necessary for this project. In particular, the original project took backups every 6 hours and stored 7 days worth of backups. If a catastrophic failure resulted in all nodes being lost and having to be rebuilt from backup, it could result in up to 6 hours of data loss which in our view was unacceptable. The resulting 168 copies of backups also took up a lot of space when only the latest backup was really needed for restoration purposes. \
   \
-  We feel that backing up the database is a responsibility best left to the user, allowing them to make a decision on how often to take backups and where to store them. Instead, to mitigate the data loss risk, we introduced a snapshot feature to take more regular snapshots (in our case, every 5 minutes). This considerably shrunk the space needed for recovery and provided a much smaller window of data loss in the event of a catastrophic failure. \
+  We feel that backing up the database is a responsibility best left to the user, allowing them to make a decision on how often to take backups and where to store them. Instead, to mitigate the data loss risk, we introduced a snapshot feature to take more regular snapshots (by default, every 15 minutes). This considerably shrunk the space needed for recovery and provided a much smaller window of data loss in the event of a catastrophic failure. \
   \
   Also, Minio's [licensing](https://github.com/minio/minio/discussions/12157) [shenanigans](https://github.com/minio/object-browser/pull/3509) made us a little uneasy.

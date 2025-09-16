@@ -41,11 +41,10 @@ class Snapshot:
     def isPending():
         """Check if a snapshot is pending or someone is restoring from Snapshot"""
 
-        return (os.path.exists(Snapshot.pendingPath)
-            or Consul.get_instance().are_nodes_restoring())
+        return os.path.exists(Snapshot.pendingPath)
 
     @staticmethod
-    def waitForSnapshot(consul):
+    def waitForSnapshot():
         """Wait for a snapshot to be created"""
 
         retryCounter = 100
@@ -61,7 +60,32 @@ class Snapshot:
             )
 
             # Keep consul sessions alive
-            consul.refresh_sessions()
+            Consul.get_instance().refresh_sessions()
+            time.sleep(5)
+
+        return False
+
+    @staticmethod
+    def waitForSnapshotAndRestores():
+        """Wait for a snapshot to be created and all nodes to finish restoring"""
+
+        retryCounter = 100
+
+        for _ in range(retryCounter):
+            if (Snapshot.exists()
+                and not Snapshot.isPending()
+                and not Consul.get_instance().are_nodes_restoring()):
+                return True
+
+            logging.debug(
+                "Still waiting for snapshot and restores (%s, %s, %s)",
+                Snapshot.isPending(),
+                Snapshot.exists(),
+                Consul.get_instance().are_nodes_restoring()
+            )
+
+            # Keep consul sessions alive
+            Consul.get_instance().refresh_sessions()
             time.sleep(5)
 
         return False
@@ -70,13 +94,13 @@ class Snapshot:
     def create():
         """Create a snapshot"""
 
-        if Snapshot.isPending():
-            logging.info("Pending snapshot, wait for it to complete before creating a new snapshot")
+        if Snapshot.isPending() or Consul.get_instance().are_nodes_restoring():
+            logging.info("Pending snapshot or restore, wait for it to complete before creating a new snapshot")
 
-            finished = Snapshot.waitForSnapshot(Consul.get_instance())
+            finished = Snapshot.waitForSnapshotAndRestores()
 
             if not finished:
-                logging.error("Snapshot creation did not finish in time")
+                logging.error("Snapshot creation / restoration did not finish in time")
                 return False
 
         logging.info("Snapshotting MySQL into dir %s", Snapshot.pendingPath)
@@ -128,7 +152,7 @@ class Snapshot:
         if Snapshot.isPending():
             logging.info("Pending snapshot, wait for it to complete before restoring")
 
-            finished = Snapshot.waitForSnapshot(Consul.get_instance())
+            finished = Snapshot.waitForSnapshot()
 
             if not finished:
                 logging.error("Snapshot creation did not finish in time")

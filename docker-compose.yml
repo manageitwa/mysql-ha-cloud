@@ -27,6 +27,7 @@ services:
       #- ./mysql_cluster_manager/src/mcm:/cluster/mcm
       #- ./mysql_cluster_manager/src/mysql_cluster_manager.py:/cluster/mysql_cluster_manager.py
       #- ./entrypoint.sh:/cluster/entrypoint.sh
+    stop_grace_period: 30s
     deploy:
       replicas: 3
       restart_policy:

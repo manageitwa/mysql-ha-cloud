@@ -332,7 +332,7 @@ class Consul:
 
         return False
 
-    def register_node(self, mysql_version=None, server_id=None):
+    def register_node(self):
         """
         Register the node in Consul
         """
@@ -344,8 +344,9 @@ class Consul:
 
                 json_string = json.dumps({
                     'ip_address': ip_address,
-                    'server_id': server_id,
-                    'mysql_version': mysql_version
+                    'server_id': '',
+                    'mysql_version': '',
+                    'restoring': False,
                 })
 
                 path = f"{Consul.instances_path}{ip_address}"
@@ -363,7 +364,121 @@ class Consul:
                 logging.warning("Unable to register node in Consul, retrying in 10 seconds")
                 time.sleep(10)
 
-        logging.error("Unable to create register node")
+        logging.error("Unable to register node")
+        return False
+
+    def populate_node_info(self, mysql_version=None, server_id=None):
+        """
+        Populate the node information in Consul
+        """
+        for _ in range(Consul.retry_counter):
+            try:
+                logging.debug("Register MySQL instance in Consul")
+                ip_address = Consul.getLocalIp()
+
+                get_result = self.client.kv.get(f"{Consul.instances_path}{ip_address}")
+
+                if get_result[1] is None or get_result[1]['Value'] is None:
+                    logging.error("Node %s not registered in Consul", ip_address)
+                    return False
+
+                node_data = json.loads(get_result[1]['Value'])
+
+                node_data['server_id'] = server_id
+                node_data['mysql_version'] = mysql_version
+
+                json_string = json.dumps(node_data)
+
+                path = f"{Consul.instances_path}{ip_address}"
+                logging.debug("Consul: Path %s, value %s (session %s)",
+                            path, json_string, self.node_health_session)
+
+                put_result = self.client.kv.put(path, json_string, acquire=self.node_health_session)
+
+                if not put_result:
+                    logging.error("Unable to create %s", path)
+                    return False
+
+                return True
+            except:
+                logging.warning("Unable to populate node info in Consul, retrying in 10 seconds")
+                time.sleep(10)
+
+        logging.error("Unable to populate node info")
+        return False
+
+    def node_set_restoring_flag(self, restoring=True):
+        """
+        Marks the current node as restoring from snapshots. Used to lock snapshot writes until replication is done
+        """
+        for _ in range(Consul.retry_counter):
+            try:
+                if restoring:
+                    logging.debug("Mark MySQL instance as restoring in Consul")
+                else:
+                    logging.debug("Mark MySQL instance as not restoring in Consul")
+
+                ip_address = Consul.getLocalIp()
+
+                get_result = self.client.kv.get(f"{Consul.instances_path}{ip_address}")
+                logging.debug("Got result %s", get_result)
+
+                if get_result[1] is None or get_result[1]['Value'] is None:
+                    logging.error("Node %s not registered in Consul", ip_address)
+                    return False
+
+                node_data = json.loads(get_result[1]['Value'])
+                node_data['restoring'] = restoring
+
+                json_string = json.dumps(node_data)
+
+                path = f"{Consul.instances_path}{ip_address}"
+                logging.debug("Consul: Path %s, value %s (session %s)",
+                            path, json_string, self.node_health_session)
+
+                put_result = self.client.kv.put(path, json_string, acquire=self.node_health_session)
+
+                if not put_result:
+                    logging.error("Unable to create %s", path)
+                    return False
+
+                return True
+            except:
+                logging.warning("Unable to mark node as restoring in Consul, retrying in 10 seconds")
+                time.sleep(10)
+
+        logging.error("Unable to mark node as restoring")
+        return False
+
+    def are_nodes_restoring(self):
+        """
+        Check if any nodes are restoring from snapshots
+        """
+        for _ in range(Consul.retry_counter):
+            try:
+                logging.debug("Check if any nodes are restoring from snapshots")
+
+                result = self.client.kv.get(Consul.instances_path, recurse=True)
+                logging.debug("Got result %s", result)
+
+                if result[1] is not None:
+                    for node in result[1]:
+                        node_value = node['Value']
+                        node_data = json.loads(node_value)
+
+                        if not "restoring" in node_data:
+                            logging.error("Restoring flag missing in %s", node)
+                            continue
+
+                        if node_data["restoring"] is True:
+                            logging.debug("Node %s is restoring", node_data)
+                            return True
+
+                return False
+            except:
+                logging.warning("Unable to get registered nodes from Consul, retrying in 10 seconds")
+                time.sleep(10)
+
         return False
 
     def refresh_sessions(self):

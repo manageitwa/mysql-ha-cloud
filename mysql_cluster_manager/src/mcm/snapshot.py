@@ -39,9 +39,10 @@ class Snapshot:
 
     @staticmethod
     def isPending():
-        """Check if a snapshot is pending"""
+        """Check if a snapshot is pending or someone is restoring from Snapshot"""
 
-        return os.path.exists(Snapshot.pendingPath)
+        return (os.path.exists(Snapshot.pendingPath)
+            or Consul.get_instance().are_nodes_restoring())
 
     @staticmethod
     def waitForSnapshot(consul):
@@ -136,6 +137,8 @@ class Snapshot:
         oldMysqlDir = None
 
         try:
+            Consul.get_instance().node_set_restoring_flag(restoring=True)
+
             logging.info("Restoring snapshot from %s", Snapshot.currentPath)
 
             if os.path.isfile(f"{Mysql.mysql_datadir}/ib_logfile0"):
@@ -169,6 +172,7 @@ class Snapshot:
                 logging.info("Removing old MySQL data from %s", oldMysqlDir)
                 rmtree(oldMysqlDir)
 
+            Consul.get_instance().node_set_restoring_flag(restoring=False)
             return True
         except:
             logging.exception("Failed to restore snapshot")
@@ -185,6 +189,7 @@ class Snapshot:
                     destPath = f"{Mysql.mysql_datadir}/{entry}"
                     move(sourcePath, destPath)
 
+            Consul.get_instance().node_set_restoring_flag(restoring=False)
             return False
 
     @staticmethod

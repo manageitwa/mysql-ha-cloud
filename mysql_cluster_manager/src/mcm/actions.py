@@ -53,6 +53,9 @@ class Actions:
         # Keep session alive until we start the main loop
         Consul.get_instance().start_session_auto_refresh_thread()
 
+        # Register node
+        Consul.get_instance().register_node()
+
         logging.info("Init local node (leader=%s, backup=%s)",
                      replication_leader, snapshotExists)
 
@@ -85,8 +88,8 @@ class Actions:
         mysql_version = Mysql.execute_query_as_root("SELECT version()")[0]['version()']
         server_id = Mysql.execute_query_as_root("SELECT @@GLOBAL.server_id")[0]['@@GLOBAL.server_id']
 
-        Consul.get_instance().register_node(mysql_version=mysql_version,
-                                            server_id=server_id)
+        Consul.get_instance().populate_node_info(mysql_version=mysql_version,
+                                                 server_id=server_id)
 
         # Remove the old replication configuration (e.g., from backup)
         Mysql.delete_replication_config()

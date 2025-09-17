@@ -148,6 +148,10 @@ class Consul:
                             logging.error("ip_address missing in %s", node)
                             continue
 
+                        if "replicating" in node_data and node_data["replicating"] is True:
+                            logging.debug("Skipping node %s as it is currently replicating", node_data)
+                            continue
+
                         ip_address = node_data["ip_address"]
                         mysql_nodes.append(ip_address)
 

@@ -11,6 +11,7 @@ This project is a fork of the excellent [MySQL-HA-Cloud](https://github.com/jnid
 - Transparent connection routing for read/write splitting using [ProxySQL](https://proxysql.com/).
 - Horizontally scalable MySQL deployment - increase and decrease nodes as necessary.
 - Compatible with Docker Swarm ~~and Kubernetes~~ ([See notes](#notes-and-faq)).
+- Full support for TLS connections to the MySQL cluster.
 
 ## Changes from original project
 
@@ -20,33 +21,36 @@ A couple of changes have been made to this fork compared to the original project
 - MinIO storage of backups has been removed entirely from this project and atomic snapshotting is now used. ([See notes](#notes-and-faq))
 - Consul is no longer required as a separate service, as the embedded Consul CLI is now used as a server agent in each node. The resolution of the DNS is handled internally.
 - The image is now based on the official MySQL 8.4 image, which is based on Oracle Linux 9 as opposed to Debian Bookworm.
-- Nodes should now gracefully remove themselves from the cluster if they are stopped by Docker, or if the daemon crashes at any point, unless the container is killed by a SIGKILL signal. However, the other nodes *should* be able to recover from this scenario as well, as long as the tolerance is maintained.
+- Nodes should now gracefully remove themselves from the cluster if they are stopped by Docker, or if the daemon crashes at any point, unless the container is killed by a SIGKILL signal. However, the other nodes _should_ be able to recover from this scenario as well, as long as the tolerance is maintained.
 - Support for Docker secrets has been introduced - all environment variables can be suffixed with `_FILE` to read from a file instead of passing the value directly.
 - Some environment variables have been dropped, and others have been renamed. Please see environment variables defined below.
+- Full support for TLS connections (either optional or enforced) through ProxySQL and MySQL.
 
 ## Deployment
-
-
 
 ## Environment variables
 
 The following environment variables are used to configure this service.
 
-| Variable | Required | Default | Description |
-| -------- | -------- | ------- | ----------- |
-| `CONSUL_BOOTSTRAP_SERVICE` | No | `"mysql"` | The name of the service to bootstrap the Consul agent for. This should match your service name. |
-| `CONSUL_BOOTSTRAP_EXPECT` | No | `"3"` | The number of instances to expect in the cluster in order for Consul to bootstrap. We have set this to 3 by default for failover, and should be used as a minimum. This _does not_ have to match your number of replicas, as long as your number of replicas is greater than or equal to this number. |
-| `CONSUL_ENABLE_UI` | No | `"false"` | If `"true"` or `1`, the Consul UI will be enabled. This may reveal information about your cluster, so only enable it if you can secure it. |
-| `SNAPSHOT_MINUTES` | No | `15` | Define the interval (in minutes) for snapshots to occur. |
-| `MYSQL_ROOT_PASSWORD` | **Yes** | *None* | Defines the root password assigned to all nodes. This must be specified in order for nodes to be bootstrapped. It is recommended that you use a secret to provide this value. |
-| `MYSQL_USER` | **Yes** | *None* | Defines a username that will be created on initialisation. |
-| `MYSQL_PASSWORD` | **Yes** | *None* | Defines the password for the `MYSQL_USER` account. It is recommended that you use a secret to provide this value. |
-| `MYSQL_BACKUP_USER` | **Yes** | *None* | Defines a username for an account, created on initialisation, that will be used by XtraBackup to take snapshots of the database. |
-| `MYSQL_BACKUP_PASSWORD` | **Yes** | *None* | Defines the password for the `MYSQL_BACKUP_USER` account. It is recommend that you use a secret to provide this value. |
-| `MYSQL_REPLICATION_USER` | **Yes** | *None* | Defines a username for an account, created on initialisation, that will be used by the nodes for replication. |
-| `MYSQL_REPLICATION_PASSWORD` | **Yes** | *None* | Defines the password for the `MYSQL_REPLICATION_USER` account. It is recommended that you use a secret to provide this value. |
+| Variable                     | Required | Default   | Description                                                                                                                                                                                                                                                                                           |
+| ---------------------------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CONSUL_BOOTSTRAP_SERVICE`   | No       | `"mysql"` | The name of the service to bootstrap the Consul agent for. This should match your service name.                                                                                                                                                                                                       |
+| `CONSUL_BOOTSTRAP_EXPECT`    | No       | `"3"`     | The number of instances to expect in the cluster in order for Consul to bootstrap. We have set this to 3 by default for failover, and should be used as a minimum. This _does not_ have to match your number of replicas, as long as your number of replicas is greater than or equal to this number. |
+| `CONSUL_ENABLE_UI`           | No       | `"false"` | If `"true"` or `1`, the Consul UI will be enabled. This may reveal information about your cluster, so only enable it if you can secure it.                                                                                                                                                            |
+| `SNAPSHOT_MINUTES`           | No       | `15`      | Define the interval (in minutes) for snapshots to occur.                                                                                                                                                                                                                                              |
+| `MYSQL_ROOT_PASSWORD`        | **Yes**  | _None_    | Defines the root password assigned to all nodes. This must be specified in order for nodes to be bootstrapped. It is recommended that you use a secret to provide this value.                                                                                                                         |
+| `MYSQL_USER`                 | **Yes**  | _None_    | Defines a username that will be created on initialisation.                                                                                                                                                                                                                                            |
+| `MYSQL_PASSWORD`             | **Yes**  | _None_    | Defines the password for the `MYSQL_USER` account. It is recommended that you use a secret to provide this value.                                                                                                                                                                                     |
+| `MYSQL_BACKUP_USER`          | **Yes**  | _None_    | Defines a username for an account, created on initialisation, that will be used by XtraBackup to take snapshots of the database.                                                                                                                                                                      |
+| `MYSQL_BACKUP_PASSWORD`      | **Yes**  | _None_    | Defines the password for the `MYSQL_BACKUP_USER` account. It is recommend that you use a secret to provide this value.                                                                                                                                                                                |
+| `MYSQL_REPLICATION_USER`     | **Yes**  | _None_    | Defines a username for an account, created on initialisation, that will be used by the nodes for replication.                                                                                                                                                                                         |
+| `MYSQL_REPLICATION_PASSWORD` | **Yes**  | _None_    | Defines the password for the `MYSQL_REPLICATION_USER` account. It is recommended that you use a secret to provide this value.                                                                                                                                                                         |
+| `MYSQL_TLS_CA`               | No       | _None_    | If using TLS for MySQL connections, this variable should contain the path to the certificate authority file in PEM format.                                                                                                                                                                            |
+| `MYSQL_TLS_CERT`             | No       | _None_    | If using TLS for MySQL connections, this variable should contain the path to the public certificate.                                                                                                                                                                                                  |
+| `MYSQL_TLS_KEY`              | No       | _None_    | If using TLS for MySQL connections, this variable should contain the path to the private certificate.                                                                                                                                                                                                 |
+| `MYSQL_TLS_REQUIRED`         | No       | `"true"`  | If all TLS variables above are specified, this variable may be set to `"true"` or `1` to enforce TLS connections.                                                                                                                                                                                     |
 
-All environment variables above can be suffixed with `_FILE`, which can be used to point to a path where a secret is made available - for example, you could set `MYSQL_USER_FILE` to point to `/run/secrets/MYSQL_USER`, which would then use the value of secret `MYSQL_USER` to define the application user.
+With the exception of the `MYSQL_TLS_*` environment variables, all environment variables above can be suffixed with `_FILE`, which can be used to point to a path where a secret is made available - for example, you could set `MYSQL_USER_FILE` to point to `/run/secrets/MYSQL_USER`, which would then use the value of secret `MYSQL_USER` to define the application user.
 
 ## Volumes
 

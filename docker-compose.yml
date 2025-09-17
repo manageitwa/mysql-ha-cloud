@@ -8,7 +8,7 @@ services:
     environment:
       CONSUL_BOOTSTRAP_EXPECT: 3
 
-      # Obviously, don't use these in production
+      # Obviously, don't use these credentials in production
       MYSQL_ROOT_PASSWORD: root_pass
       MYSQL_DATABASE: application
       MYSQL_USER: application_user
@@ -19,15 +19,23 @@ services:
 
       MYSQL_REPLICATION_USER: replication_user
       MYSQL_REPLICATION_PASSWORD: replication_pass
+
+      # MYSQL_TLS_CA: /cert/ca.pem
+      # MYSQL_TLS_CERT: /cert/cert.pem
+      # MYSQL_TLS_KEY: /cert/cert.key
+      # MYSQL_TLS_REQUIRED: "false"
     networks:
       mysql-ha:
     volumes:
       - ./snapshots:/snapshots
       # For development only:
-      #- ./mysql_cluster_manager/src/mcm:/cluster/mcm
-      #- ./mysql_cluster_manager/src/mysql_cluster_manager.py:/cluster/mysql_cluster_manager.py
-      #- ./entrypoint.sh:/cluster/entrypoint.sh
-    stop_grace_period: 30s
+      # - ./cert/ca.pem:/cert/ca.pem:ro
+      # - ./cert/cert.pem:/cert/cert.pem:ro
+      # - ./cert/cert.key:/cert/cert.key:ro
+      - ./mysql_cluster_manager/src/mcm:/cluster/mcm
+      - ./mysql_cluster_manager/src/mysql_cluster_manager.py:/cluster/mysql_cluster_manager.py
+      - ./entrypoint.sh:/cluster/entrypoint.sh
+    stop_grace_period: 15s
     deploy:
       replicas: 3
       restart_policy:
@@ -35,5 +43,5 @@ services:
         delay: 30s
         max_attempts: 5
     ports:
-      - 6033:6032
+      - 3307:3306
       - 3306:6033

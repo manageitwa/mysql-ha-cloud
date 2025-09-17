@@ -8,6 +8,19 @@ class Utils:
     """
     Utilities for the project
     """
+    @staticmethod
+    def get_envvar(name, default = None):
+        """
+        Get the value of an environment variable ONLY (not from a secret file). Should be
+        used only for variables that are expected to be file paths.
+        """
+        if name in os.environ:
+            return os.environ[name]
+
+        if default is None:
+            raise Exception(f"Environment variable {name} not found")
+        else:
+            return default
 
     @staticmethod
     def get_envvar_or_secret(name, default = None):

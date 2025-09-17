@@ -3,12 +3,10 @@
 import os
 import sys
 import time
-import shutil
 import logging
 import threading
 import subprocess
 
-from shutil import rmtree
 from datetime import timedelta
 
 import mysql.connector
@@ -114,6 +112,19 @@ class Mysql:
         outfile.write(f"server_id={server_id}\n")
         outfile.write("gtid_mode=ON\n")
         outfile.write("enforce-gtid-consistency=ON\n")
+
+        if (Utils.get_envvar('MYSQL_TLS_CA')
+            and Utils.get_envvar('MYSQL_TLS_CERT')
+            and Utils.get_envvar('MYSQL_TLS_KEY')
+        ):
+            outfile.write(f"ssl_ca={Utils.get_envvar('MYSQL_TLS_CA')}\n")
+            outfile.write(f"ssl_cert={Utils.get_envvar('MYSQL_TLS_CERT')}\n")
+            outfile.write(f"ssl_key={Utils.get_envvar('MYSQL_TLS_KEY')}\n")
+
+        if (Utils.get_envvar_or_secret("MYSQL_TLS_REQUIRED", "True").lower() == "true" or
+            Utils.get_envvar_or_secret("MYSQL_TLS_REQUIRED", "True") == "1"):
+                outfile.write("require_secure_transport=ON\n")
+
         outfile.close()
 
     @staticmethod
@@ -129,11 +140,24 @@ class Mysql:
 
         Mysql.execute_query_as_root("STOP REPLICA", discard_result=True)
 
-        Mysql.execute_query_as_root(f"CHANGE REPLICATION SOURCE TO SOURCE_HOST = '{leader_ip}', "
-                                    f"SOURCE_PORT = 3306, SOURCE_USER = '{replication_user}', "
-                                    f"SOURCE_PASSWORD = '{replication_password}', "
-                                    "SOURCE_AUTO_POSITION = 1, GET_SOURCE_PUBLIC_KEY = 1"
-                                    , discard_result=True)
+        if (Utils.get_envvar('MYSQL_TLS_CA')
+            and Utils.get_envvar('MYSQL_TLS_CERT')
+            and Utils.get_envvar('MYSQL_TLS_KEY')
+        ):
+            Mysql.execute_query_as_root(f"CHANGE REPLICATION SOURCE TO SOURCE_HOST = '{leader_ip}', "
+                                        f"SOURCE_PORT = 3306, SOURCE_USER = '{replication_user}', "
+                                        f"SOURCE_PASSWORD = '{replication_password}', "
+                                        "SOURCE_AUTO_POSITION = 1, GET_SOURCE_PUBLIC_KEY = 1, "
+                                        f"SOURCE_SSL=1, SOURCE_SSL_CA = '{Utils.get_envvar('MYSQL_TLS_CA')}', "
+                                        f"SOURCE_SSL_CERT = '{Utils.get_envvar('MYSQL_TLS_CERT')}', "
+                                        f"SOURCE_SSL_KEY = '{Utils.get_envvar('MYSQL_TLS_KEY')}'"
+                                        , discard_result=True)
+        else:
+            Mysql.execute_query_as_root(f"CHANGE REPLICATION SOURCE TO SOURCE_HOST = '{leader_ip}', "
+                                        f"SOURCE_PORT = 3306, SOURCE_USER = '{replication_user}', "
+                                        f"SOURCE_PASSWORD = '{replication_password}', "
+                                        "SOURCE_AUTO_POSITION = 1, GET_SOURCE_PUBLIC_KEY = 1"
+                                        , discard_result=True)
 
         Mysql.execute_query_as_root("START REPLICA", discard_result=True)
 

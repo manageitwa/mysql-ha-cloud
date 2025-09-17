@@ -56,4 +56,5 @@ RUN pip3 install --cache-dir /cluster/.cache --user -r requirements
 
 VOLUME /snapshots
 EXPOSE 6032/tcp 6033/tcp
+STOPSIGNAL SIGTERM
 CMD ["bash", "entrypoint.sh"]

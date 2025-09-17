@@ -58,7 +58,6 @@ for required_var in required_envvars_or_secrets:
 
 # Perform operations
 if args.operation == 'join_or_bootstrap':
-    signal.signal(signal.SIGINT, Actions.terminate_handler)
     signal.signal(signal.SIGTERM, Actions.terminate_handler)
     Actions.join_or_bootstrap()
 elif args.operation == 'mysql_backup':

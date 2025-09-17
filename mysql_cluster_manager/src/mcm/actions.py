@@ -3,6 +3,7 @@
 import sys
 import time
 import logging
+import signal
 import subprocess
 
 from datetime import timedelta, datetime
@@ -176,10 +177,14 @@ class Actions:
             time.sleep(1)
 
     @staticmethod
-    def terminate_handler(signum):
+    def terminate_handler(signum, frame):
         """
         Termination handler for the main event loop
         """
+
+        if (signum == signal.SIGCHLD):
+            # Child process terminated, ignore
+            return
 
         logging.info("Received signal %s, terminating...", signum)
 

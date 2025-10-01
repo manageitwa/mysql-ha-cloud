@@ -47,7 +47,7 @@ COPY mysql_cluster_manager/src .
 
 # Install Python dependencies
 ENV PYTHONUSERBASE=/cluster/.prefix
-RUN pip3 install --cache-dir /cluster/.cache --user -r requirements
+RUN pip3 install --no-cache-dir --user -r requirements
 
 COPY entrypoint.sh .
 

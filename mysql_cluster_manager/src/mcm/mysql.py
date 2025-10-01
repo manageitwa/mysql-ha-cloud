@@ -145,8 +145,7 @@ class Mysql:
             and Utils.get_envvar('MYSQL_TLS_KEY')
         ):
             Mysql.execute_query_as_root(f"CHANGE REPLICATION SOURCE TO SOURCE_HOST = '{leader_ip}', "
-                                        f"SOURCE_PORT = 3306, SOURCE_USER = '{replication_user}', "
-                                        f"SOURCE_PASSWORD = '{replication_password}', "
+                                        f"SOURCE_PORT = 3306, "
                                         "SOURCE_AUTO_POSITION = 1, GET_SOURCE_PUBLIC_KEY = 1, "
                                         f"SOURCE_SSL=1, SOURCE_SSL_CA = '{Utils.get_envvar('MYSQL_TLS_CA')}', "
                                         f"SOURCE_SSL_CERT = '{Utils.get_envvar('MYSQL_TLS_CERT')}', "
@@ -154,12 +153,12 @@ class Mysql:
                                         , discard_result=True)
         else:
             Mysql.execute_query_as_root(f"CHANGE REPLICATION SOURCE TO SOURCE_HOST = '{leader_ip}', "
-                                        f"SOURCE_PORT = 3306, SOURCE_USER = '{replication_user}', "
-                                        f"SOURCE_PASSWORD = '{replication_password}', "
+                                        f"SOURCE_PORT = 3306, "
                                         "SOURCE_AUTO_POSITION = 1, GET_SOURCE_PUBLIC_KEY = 1"
                                         , discard_result=True)
 
-        Mysql.execute_query_as_root("START REPLICA", discard_result=True)
+        Mysql.execute_query_as_root(f"START REPLICA USER = '{replication_user}' "
+                                    f"PASSWORD = '{replication_password}'", discard_result=True)
 
         # Set replicia to read only
         logging.info("Set MySQL-Server mode to read-only")

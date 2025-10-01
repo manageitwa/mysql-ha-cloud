@@ -1,10 +1,11 @@
-#!/bin/bash
-#
-# Start the MySQL cluster manager
-#
-########################
+#!/usr/bin/env bash
 
-# Exit on error
 set -e
 
-exec ./mysql_cluster_manager.py join_or_bootstrap
+if [[ "$1" == --* ]]; then
+    exec ./mysql_cluster_manager.py join_or_bootstrap "$@"
+elif [[ "$1" =~ ^(join_or_bootstrap|mysql_(backup|restore|start|stop|autobackup)|proxysql_init)$ ]]; then
+    exec ./mysql_cluster_manager.py "$@"
+fi
+
+exec "$@"

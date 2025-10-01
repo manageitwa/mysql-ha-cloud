@@ -16,12 +16,12 @@ RUN \
         unzip \
         wget && \
     # Install Percona XtraBackup
-    wget https://downloads.percona.com/downloads/Percona-XtraBackup-8.4/Percona-XtraBackup-8.4.0-3/binary/redhat/9/x86_64/percona-xtrabackup-84-8.4.0-3.1.el9.x86_64.rpm -O /tmp/xtrabackup.rpm && \
+    wget https://downloads.percona.com/downloads/Percona-XtraBackup-8.4/Percona-XtraBackup-8.4.0-4/binary/redhat/9/x86_64/percona-xtrabackup-84-8.4.0-4.1.el9.x86_64.rpm -O /tmp/xtrabackup.rpm && \
     rpm -i /tmp/xtrabackup.rpm && \
     rm /tmp/xtrabackup.rpm && \
     # Install Consul CLI
-    wget https://releases.hashicorp.com/consul/1.21.4/consul_1.21.4_linux_amd64.zip -O /tmp/consul.zip && \
-    echo "a641502dc2bd28e1ed72d3d48a0e8b98c83104d827cf33bee2aed198c0b849df /tmp/consul.zip" | sha256sum -c && \
+    wget https://releases.hashicorp.com/consul/1.21.5/consul_1.21.5_linux_amd64.zip -O /tmp/consul.zip && \
+    echo "2dfb63fcabe9f15b956cf408248d9ebe36cfd662ca182352942a3bd4e5d5faca /tmp/consul.zip" | sha256sum -c && \
     unzip /tmp/consul.zip -d /usr/local/bin && \
     rm /usr/local/bin/LICENSE.txt && \
     rm /tmp/consul.zip && \
@@ -44,17 +44,15 @@ WORKDIR /cluster
 
 COPY mysql_cluster_manager/requirements .
 COPY mysql_cluster_manager/src .
-COPY entrypoint.sh .
-
-COPY mysql_cluster_manager/requirements .
-COPY mysql_cluster_manager/src .
-COPY entrypoint.sh .
 
 # Install Python dependencies
 ENV PYTHONUSERBASE=/cluster/.prefix
 RUN pip3 install --cache-dir /cluster/.cache --user -r requirements
 
+COPY entrypoint.sh .
+
 VOLUME /snapshots
 EXPOSE 6032/tcp 6033/tcp
 STOPSIGNAL SIGTERM
-CMD ["bash", "entrypoint.sh"]
+ENTRYPOINT ["/cluster/entrypoint.sh"]
+CMD ["join_or_bootstrap"]

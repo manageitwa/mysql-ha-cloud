@@ -1,0 +1,49 @@
+networks:
+  mysql-ha:
+    driver: overlay
+
+volumes:
+  snapshot-data:
+
+services:
+  mysql:
+    image: ghcr.io/manageitwa/mysql-ha-cloud:latest
+    environment:
+      CONSUL_BOOTSTRAP_EXPECT: 3
+
+      # Obviously, don't use these credentials in production
+      MYSQL_ROOT_PASSWORD: root_pass
+      MYSQL_DATABASE: application
+      MYSQL_USER: application_user
+      MYSQL_PASSWORD: application_pass
+
+      MYSQL_BACKUP_USER: backup_user
+      MYSQL_BACKUP_PASSWORD: backup_pass
+
+      MYSQL_REPLICATION_USER: replication_user
+      MYSQL_REPLICATION_PASSWORD: replication_pass
+
+      # If using TLS, uncomment these and mount the certs below
+      # MYSQL_TLS_CA: /cert/ca.pem
+      # MYSQL_TLS_CERT: /cert/cert.pem
+      # MYSQL_TLS_KEY: /cert/cert.key
+      # MYSQL_TLS_REQUIRED: "false"
+    networks:
+      mysql-ha:
+    volumes:
+      - snapshot-data:/snapshots
+
+      # If using TLS:
+      # - ./cert/ca.pem:/cert/ca.pem:ro
+      # - ./cert/cert.pem:/cert/cert.pem:ro
+      # - ./cert/cert.key:/cert/cert.key:ro
+    stop_grace_period: 15s
+    deploy:
+      replicas: 3
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+        max_attempts: 5
+    ports:
+      - 3307:3306
+      - 3306:6033

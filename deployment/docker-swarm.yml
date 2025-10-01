@@ -37,6 +37,8 @@ services:
       # - ./cert/ca.pem:/cert/ca.pem:ro
       # - ./cert/cert.pem:/cert/cert.pem:ro
       # - ./cert/cert.key:/cert/cert.key:ro
+    tmpfs:
+      - /tmp/consul
     stop_grace_period: 15s
     deploy:
       replicas: 3
@@ -44,6 +46,16 @@ services:
         condition: on-failure
         delay: 30s
         max_attempts: 5
+      rollback_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: pause
+        order: start-first
+      update_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: rollback
+        order: start-first
     ports:
       - 3307:3306
       - 3306:6033

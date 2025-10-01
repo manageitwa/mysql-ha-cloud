@@ -5,6 +5,7 @@ networks:
 services:
   mysql:
     image: manageitwa/mysql-ha-cloud:test
+    command: --log-level DEBUG
     environment:
       CONSUL_BOOTSTRAP_EXPECT: 3
       CONSUL_ENABLE_UI: "true"
@@ -37,6 +38,8 @@ services:
       - ./mysql_cluster_manager/src/mcm:/cluster/mcm
       - ./mysql_cluster_manager/src/mysql_cluster_manager.py:/cluster/mysql_cluster_manager.py
       - ./entrypoint.sh:/cluster/entrypoint.sh
+    tmpfs:
+      - /tmp/consul
     stop_grace_period: 15s
     deploy:
       replicas: 3
@@ -44,6 +47,16 @@ services:
         condition: on-failure
         delay: 30s
         max_attempts: 5
+      rollback_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: pause
+        order: start-first
+      update_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: rollback
+        order: start-first
     ports:
-      - 3307:3306
+      - 3307:6033
       - 8500:8500

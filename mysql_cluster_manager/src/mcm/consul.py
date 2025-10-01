@@ -1,6 +1,5 @@
 """This file is part of the MySQL cluster manager"""
 
-import os
 import sys
 import time
 import json
@@ -22,9 +21,6 @@ class Consul:
 
     # The signeton instance
     __instance = None
-
-    # Retry counter for operations
-    retry_counter = 30
 
     # KV prefix
     kv_prefix = "mcm/"
@@ -50,19 +46,23 @@ class Consul:
 
         Consul.__instance = self
         logging.info("Register Consul connection")
-        for _ in range(Consul.retry_counter):
+
+        # Allow 30 seconds for Consul agent to start
+        for _ in range(6):
             try:
                 self.client = pyconsul.Consul()
             except:
-                logging.warning("Unable to connect to Consul, retrying in 10 seconds")
-                time.sleep(10)
+                logging.warning("Unable to connect to Consul, retrying in 5 seconds")
+                time.sleep(5)
                 continue
 
         if not self.client:
             raise Exception("Unable to establish a connection with Consul")
 
-        self.active_sessions = []
-        self.node_health_session = self.create_node_health_session()
+        self.node_health_session = None
+        self.create_node_health_session()
+        self.mysql_version = None
+        self.server_id = None
 
         # The session auto refresh thread
         self.auto_refresh_thread = None
@@ -92,7 +92,7 @@ class Consul:
         while self.run_auto_refresh_thread:
             logging.debug("Refreshing active consul sessions from auto refresh thread")
             self.refresh_sessions()
-            time.sleep(2)
+            time.sleep(5)
 
     def stop_session_auto_refresh_thread(self):
         """
@@ -114,16 +114,18 @@ class Consul:
 
         session = None
 
-        for _ in range(Consul.retry_counter):
+        # Allow 30 seconds for session to be created
+        for _ in range(6):
             try:
-                session = self.create_session(
-                    name=Consul.instances_session_key,
-                    behavior='delete', ttl=15, lock_delay=0)
+                self.node_health_session = self.client.session.create(name=Consul.instances_session_key,
+                                                                      behavior='delete',
+                                                                      ttl=15,
+                                                                      lock_delay=0)
 
-                return session
+                return self.node_health_session
             except:
-                logging.warning("Unable to create a session in Consul, retrying in 10 seconds")
-                time.sleep(10)
+                logging.warning("Unable to create a session in Consul, retrying in 5 seconds")
+                time.sleep(5)
 
         if session is None:
             raise Exception("Unable to create node health session")
@@ -135,7 +137,9 @@ class Consul:
         """
         mysql_nodes = []
 
-        for _ in range(Consul.retry_counter):
+        # Allow 3 minutes of retries to get the nodes as this will usually only fail on a potential
+        # network downtime
+        for _ in range(36):
             try:
                 result = self.client.kv.get(Consul.instances_path, recurse=True)
 
@@ -157,8 +161,8 @@ class Consul:
 
                 return mysql_nodes
             except:
-                logging.warning("Unable to get registered nodes from Consul, retrying in 10 seconds")
-                time.sleep(10)
+                logging.warning("Unable to get registered nodes from Consul, retrying in 5 seconds")
+                time.sleep(5)
 
         return mysql_nodes
 
@@ -170,7 +174,9 @@ class Consul:
           * If Update fails, retry
           * If Key not exists, try to create
         """
-        for _ in range(Consul.retry_counter):
+
+        # Allow 30 seconds for a server ID to be assigned
+        for _ in range(6):
             try:
                 result = self.client.kv.get(Consul.kv_server_id)
 
@@ -209,8 +215,8 @@ class Consul:
                                 put_result, server_data['last_used_id'])
                     return server_data['last_used_id']
             except:
-                logging.debug("Unable to get MYSQL server ID, retrying in 10 seconds")
-                time.sleep(10)
+                logging.debug("Unable to get MYSQL server ID, retrying in 5 seconds")
+                time.sleep(5)
 
         raise Exception("Unable to determine server id")
 
@@ -219,7 +225,8 @@ class Consul:
         Test if this is the MySQL replication leader or not
         """
 
-        for _ in range(Consul.retry_counter):
+        # Allow 3 minutes of retries
+        for _ in range(36):
             try:
                 result = self.client.kv.get(Consul.replication_leader_path)
 
@@ -234,8 +241,8 @@ class Consul:
 
                 return leader_session == self.node_health_session
             except:
-                logging.warning("Unable to determine replication leader from Consul, retrying in 10 seconds")
-                time.sleep(10)
+                logging.warning("Unable to determine replication leader from Consul, retrying in 5 seconds")
+                time.sleep(5)
 
         return False
 
@@ -244,7 +251,8 @@ class Consul:
         Get the IP of the current replication ledear
         """
 
-        for _ in range(Consul.retry_counter):
+        # Allow 3 minutes of retries
+        for _ in range(36):
             try:
                 result = self.client.kv.get(Consul.replication_leader_path)
 
@@ -260,8 +268,8 @@ class Consul:
 
                 return server_data['ip_address']
             except:
-                logging.warning("Unable to get replication leader IP from Consul, retrying in 10 seconds")
-                time.sleep(10)
+                logging.warning("Unable to get replication leader IP from Consul, retrying in 5 seconds")
+                time.sleep(5)
 
         return None
 
@@ -270,7 +278,8 @@ class Consul:
         Try to become the new replication leader
         """
 
-        for _ in range(Consul.retry_counter):
+        # Allow 3 minutes of retries
+        for _ in range(36):
             try:
                 result = self.client.kv.get(Consul.replication_leader_path)
 
@@ -295,8 +304,8 @@ class Consul:
 
                 return False
             except:
-                logging.warning("Unable to become replication leader due to error communicating with Consul, retrying in 10 seconds")
-                time.sleep(10)
+                logging.warning("Unable to become replication leader due to error communicating with Consul, retrying in 5 seconds")
+                time.sleep(5)
 
         return False
 
@@ -306,7 +315,8 @@ class Consul:
         Register the MySQL primary service
         """
 
-        for _ in range(Consul.retry_counter):
+        # Allow 30 seconds for session to be created
+        for _ in range(6):
             try:
                 ip_address = Consul.getLocalIp()
 
@@ -331,8 +341,8 @@ class Consul:
 
                 return True
             except:
-                logging.warning("Unable to register service in Consul, retrying in 10 seconds")
-                time.sleep(10)
+                logging.warning("Unable to register service in Consul, retrying in 5 seconds")
+                time.sleep(5)
 
         return False
 
@@ -341,7 +351,8 @@ class Consul:
         Register the node in Consul
         """
 
-        for _ in range(Consul.retry_counter):
+        # Allow 30 seconds for node to be registered
+        for _ in range(6):
             try:
                 logging.debug("Register MySQL instance in Consul")
                 ip_address = Consul.getLocalIp()
@@ -365,8 +376,8 @@ class Consul:
 
                 return True
             except:
-                logging.warning("Unable to register node in Consul, retrying in 10 seconds")
-                time.sleep(10)
+                logging.warning("Unable to register node in Consul, retrying in 5 seconds")
+                time.sleep(5)
 
         logging.error("Unable to register node")
         return False
@@ -375,9 +386,14 @@ class Consul:
         """
         Populate the node information in Consul
         """
-        for _ in range(Consul.retry_counter):
+
+        self.mysql_version = mysql_version
+        self.server_id = server_id
+
+        # Allow a minute for node info to be populated
+        for _ in range(12):
             try:
-                logging.debug("Register MySQL instance in Consul")
+                logging.debug("Populate MySQL instance info in Consul")
                 ip_address = Consul.getLocalIp()
 
                 get_result = self.client.kv.get(f"{Consul.instances_path}{ip_address}")
@@ -388,8 +404,8 @@ class Consul:
 
                 node_data = json.loads(get_result[1]['Value'])
 
-                node_data['server_id'] = server_id
-                node_data['mysql_version'] = mysql_version
+                node_data['server_id'] = self.server_id
+                node_data['mysql_version'] = self.mysql_version
 
                 json_string = json.dumps(node_data)
 
@@ -400,13 +416,13 @@ class Consul:
                 put_result = self.client.kv.put(path, json_string, acquire=self.node_health_session)
 
                 if not put_result:
-                    logging.error("Unable to create %s", path)
+                    logging.error("Unable to populate node info for %s", path)
                     return False
 
                 return True
             except:
-                logging.warning("Unable to populate node info in Consul, retrying in 10 seconds")
-                time.sleep(10)
+                logging.warning("Unable to populate node info in Consul, retrying in 5 seconds")
+                time.sleep(5)
 
         logging.error("Unable to populate node info")
         return False
@@ -415,7 +431,9 @@ class Consul:
         """
         Marks the current node as restoring from snapshots. Used to lock snapshot writes until replication is done
         """
-        for _ in range(Consul.retry_counter):
+
+        # Allow a minute for node info to be populated
+        for _ in range(12):
             try:
                 if restoring:
                     logging.debug("Mark MySQL instance as restoring in Consul")
@@ -443,13 +461,13 @@ class Consul:
                 put_result = self.client.kv.put(path, json_string, acquire=self.node_health_session)
 
                 if not put_result:
-                    logging.error("Unable to create %s", path)
+                    logging.error("Unable to mark restoring flag on %s", path)
                     return False
 
                 return True
             except:
-                logging.warning("Unable to mark node as restoring in Consul, retrying in 10 seconds")
-                time.sleep(10)
+                logging.warning("Unable to mark node as restoring in Consul, retrying in 5 seconds")
+                time.sleep(5)
 
         logging.error("Unable to mark node as restoring")
         return False
@@ -458,7 +476,9 @@ class Consul:
         """
         Check if any nodes are restoring from snapshots
         """
-        for _ in range(Consul.retry_counter):
+
+        # Allow 3 minutes of retries
+        for _ in range(36):
             try:
                 logging.debug("Check if any nodes are restoring from snapshots")
 
@@ -480,8 +500,8 @@ class Consul:
 
                 return False
             except:
-                logging.warning("Unable to get registered nodes from Consul, retrying in 10 seconds")
-                time.sleep(10)
+                logging.warning("Unable to get registered nodes from Consul, retrying in 5 seconds")
+                time.sleep(5)
 
         return False
 
@@ -490,64 +510,47 @@ class Consul:
         Refresh the active sessions
         """
         logging.debug("Keeping Consul sessions alive")
+        logging.debug("Refreshing session %s", self.node_health_session)
 
-        for session in self.active_sessions:
-            logging.debug("Refreshing session %s", session)
-
-            for _ in range(Consul.retry_counter):
-                try:
-                    self.client.session.renew(session)
-                    break
-                except:
-                    logging.warning("Unable to refresh session %s, retrying in 10 seconds", session)
-                    time.sleep(10)
-                    continue
-
-
-    def create_session(self, name, behavior='release', ttl=None, lock_delay=15):
-        """
-        Create a new session.
-
-        Keep in mind that the real invalidation is around 2*ttl
-        see https://github.com/hashicorp/consul/issues/1172
-        """
-
-        for _ in range(Consul.retry_counter):
+        # Allow 35 seconds to refresh session before recreating the session
+        for _ in range(7):
             try:
-                session_id = self.client.session.create(name=name,
-                                                        behavior=behavior,
-                                                        ttl=ttl,
-                                                        lock_delay=lock_delay)
-
-                # Keep session for auto refresh
-                self.active_sessions.append(session_id)
-
-                logging.debug("Created new session on node %s named %s", name, session_id)
-
-                return session_id
+                self.client.session.renew(self.node_health_session)
+                return True
             except:
-                logging.warning("Unable to create session %s, retrying in 10 seconds", name)
-                time.sleep(10)
+                logging.warning("Unable to refresh session %s, retrying in 5 seconds", self.node_health_session)
+                time.sleep(5)
+                continue
 
-        return None
+        # If the session is unable to be refreshed, try to recreate it and re-register the node, as it will be
+        # automatically delisted by the old session's lock being removed.
+        self.node_health_session = None
 
+        try:
+            self.create_node_health_session()
+            self.register_node()
+            self.populate_node_info(self.mysql_version, self.server_id)
+        except:
+            logging.error("Unable to recreate the node health session, something is wrong with Consul")
 
-    def destroy_session(self, session_id):
+        return False
+
+    def destroy_session(self):
         """
         Destory a previosly registered session
         """
 
-        if not session_id in self.active_sessions:
-            return False
+        if self.node_health_session is None:
+            logging.debug("No session to destroy")
+            return True
 
-        for _ in range(Consul.retry_counter):
+        for _ in range(6):
             try:
-                self.active_sessions.remove(session_id)
-                self.client.session.destroy(session_id)
+                self.client.session.destroy(self.node_health_session)
                 break
             except:
-                logging.warning("Unable to destroy session %s, retrying in 10 seconds", session_id)
-                time.sleep(10)
+                logging.warning("Unable to destroy session %s, retrying in 5 seconds", self.node_health_session)
+                time.sleep(5)
                 continue
 
         return True
@@ -557,21 +560,21 @@ class Consul:
         """
         Start the local Consul agent.
         """
+        if Consul.getLocalIp() is None:
+            logging.error("Unable to determine local IP address, cannot start Consul agent")
+            sys.exit(1)
+
         logging.info("Starting Consul Agent")
         consul_args = ["consul"]
         consul_args.append("agent")
         consul_args.append("-data-dir")
         consul_args.append("/tmp/consul")
 
-        if Consul.getLocalIp() is None:
-            logging.error("Unable to determine local IP address, cannot start Consul agent")
-            sys.exit(1)
-
         consul_args.append("-bind")
         consul_args.append(Consul.getLocalIp())
 
         consul_args.append("-client")
-        consul_args.append("0.0.0.0");
+        consul_args.append("0.0.0.0")
 
         consul_args.append("-server")
 

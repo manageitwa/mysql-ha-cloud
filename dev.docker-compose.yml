@@ -4,9 +4,10 @@ networks:
 
 services:
   mysql:
-    image: ghcr.io/manageitwa/mysql-ha-cloud:latest
+    image: manageitwa/mysql-ha-cloud:test
     environment:
       CONSUL_BOOTSTRAP_EXPECT: 3
+      CONSUL_ENABLE_UI: "true"
 
       # Obviously, don't use these credentials in production
       MYSQL_ROOT_PASSWORD: root_pass
@@ -20,18 +21,19 @@ services:
       MYSQL_REPLICATION_USER: replication_user
       MYSQL_REPLICATION_PASSWORD: replication_pass
 
-      # MYSQL_TLS_CA: /cert/ca.pem
-      # MYSQL_TLS_CERT: /cert/cert.pem
-      # MYSQL_TLS_KEY: /cert/cert.key
-      # MYSQL_TLS_REQUIRED: "false"
+      MYSQL_TLS_CA: /cert/ca.pem
+      MYSQL_TLS_CERT: /cert/cert.pem
+      MYSQL_TLS_KEY: /cert/cert.key
+      MYSQL_TLS_REQUIRED: "false"
     networks:
       mysql-ha:
     volumes:
       - ./snapshots:/snapshots
-      # For development only:
-      # - ./cert/ca.pem:/cert/ca.pem:ro
-      # - ./cert/cert.pem:/cert/cert.pem:ro
-      # - ./cert/cert.key:/cert/cert.key:ro
+
+      - ./cert/ca.pem:/cert/ca.pem:ro
+      - ./cert/cert.pem:/cert/cert.pem:ro
+      - ./cert/cert.key:/cert/cert.key:ro
+
       - ./mysql_cluster_manager/src/mcm:/cluster/mcm
       - ./mysql_cluster_manager/src/mysql_cluster_manager.py:/cluster/mysql_cluster_manager.py
       - ./entrypoint.sh:/cluster/entrypoint.sh
@@ -44,4 +46,4 @@ services:
         max_attempts: 5
     ports:
       - 3307:3306
-      - 3306:6033
+      - 8500:8500

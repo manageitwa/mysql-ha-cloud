@@ -188,6 +188,10 @@ class Actions:
 
         logging.info("Received signal %s, terminating...", signum)
 
+        if Consul.get_instance().node_health_session is not None:
+            Consul.get_instance().stop_session_auto_refresh_thread()
+            Consul.get_instance().destroy_session()
+
         # Leave cluster and stop the consul agent
         if Actions.consul_process is not None:
             subprocess.run(['consul', 'leave'])

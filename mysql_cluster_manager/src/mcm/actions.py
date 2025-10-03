@@ -60,12 +60,11 @@ class Actions:
         logging.info("Init local node (leader=%s, backup=%s)",
                      replication_leader, snapshotExists)
 
+        needInitialSnapshot = False
+
         if replication_leader and not snapshotExists:
             Mysql.init_database_if_needed()
-        elif replication_leader and snapshotExists:
-            Mysql.restore_backup_or_exit()
-        elif not replication_leader and snapshotExists:
-            Mysql.restore_backup_or_exit()
+            needInitialSnapshot = True
         elif not replication_leader and not snapshotExists:
             logging.info("We are not the replication leader, waiting for backups")
             snapshotExists = Snapshot.waitForSnapshot()
@@ -74,6 +73,8 @@ class Actions:
                 logging.error("No snapshot available, please check master logs or incomplete snapshot, exiting")
                 sys.exit(1)
 
+            Mysql.restore_backup_or_exit()
+        else:
             Mysql.restore_backup_or_exit()
 
         # Start ProxySQL
@@ -100,6 +101,10 @@ class Actions:
 
         # Session keep alive will be handled by the main event loop
         Consul.get_instance().stop_session_auto_refresh_thread()
+
+        # Make an initial snapshot from leader
+        if needInitialSnapshot:
+            Snapshot.create(fromSource=True)
 
         # Run the main event loop
         Actions.join_main_event_loop(consul_process, mysql_process)

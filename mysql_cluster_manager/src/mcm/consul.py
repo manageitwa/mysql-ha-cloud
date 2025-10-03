@@ -152,8 +152,12 @@ class Consul:
                             logging.error("ip_address missing in %s", node)
                             continue
 
-                        if "replicating" in node_data and node_data["replicating"] is True:
-                            logging.debug("Skipping node %s as it is currently replicating", node_data)
+                        if "restoring" in node_data and node_data["restoring"] is True:
+                            logging.debug("Skipping node %s as it is currently restoring", node_data)
+                            continue
+
+                        if "snapshotting" in node_data and node_data["snapshotting"] is True:
+                            logging.debug("Skipping node %s as it is currently snapshotting", node_data)
                             continue
 
                         ip_address = node_data["ip_address"]
@@ -361,6 +365,7 @@ class Consul:
                     'ip_address': ip_address,
                     'server_id': '',
                     'mysql_version': '',
+                    'snapshotting': False,
                     'restoring': False,
                 })
 
@@ -470,6 +475,52 @@ class Consul:
                 time.sleep(5)
 
         logging.error("Unable to mark node as restoring")
+        return False
+
+    def node_set_snapshotting_flag(self, snapshotting=True):
+        """
+        Marks the current node as snapshotting a new SQL backup. Only informational - snapshotting is
+        done nearly always from a replica node, which is already read-only.
+        """
+
+        # Allow a minute for node info to be populated
+        for _ in range(12):
+            try:
+                if snapshotting:
+                    logging.debug("Mark MySQL instance as snapshotting in Consul")
+                else:
+                    logging.debug("Mark MySQL instance as not snapshotting in Consul")
+
+                ip_address = Consul.getLocalIp()
+
+                get_result = self.client.kv.get(f"{Consul.instances_path}{ip_address}")
+                logging.debug("Got result %s", get_result)
+
+                if get_result[1] is None or get_result[1]['Value'] is None:
+                    logging.error("Node %s not registered in Consul", ip_address)
+                    return False
+
+                node_data = json.loads(get_result[1]['Value'])
+                node_data['snapshotting'] = snapshotting
+
+                json_string = json.dumps(node_data)
+
+                path = f"{Consul.instances_path}{ip_address}"
+                logging.debug("Consul: Path %s, value %s (session %s)",
+                            path, json_string, self.node_health_session)
+
+                put_result = self.client.kv.put(path, json_string, acquire=self.node_health_session)
+
+                if not put_result:
+                    logging.error("Unable to mark snapshotting flag on %s", path)
+                    return False
+
+                return True
+            except:
+                logging.warning("Unable to mark node as snapshotting in Consul, retrying in 5 seconds")
+                time.sleep(5)
+
+        logging.error("Unable to mark node as snapshotting")
         return False
 
     def are_nodes_restoring(self):

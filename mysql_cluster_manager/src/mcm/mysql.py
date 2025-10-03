@@ -373,8 +373,12 @@ class Mysql:
         logging.debug("Checking for backups")
 
         consul_client = Consul.get_instance()
-        if not consul_client.is_replication_leader():
-            logging.debug("We are not the replication master, skipping backup check")
+        if consul_client.is_replication_leader():
+            logging.debug("We are the replication master, skipping backup check as snapshots run on replicas")
+            return False
+
+        if Snapshot.isPending():
+            logging.debug("A snapshot is already in progress, skipping")
             return False
 
         backup_date = Snapshot.getTime()

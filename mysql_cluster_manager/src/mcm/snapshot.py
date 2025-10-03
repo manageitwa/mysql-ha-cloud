@@ -91,7 +91,7 @@ class Snapshot:
         return False
 
     @staticmethod
-    def create():
+    def create(fromSource = False):
         """Create a snapshot"""
 
         if Snapshot.isPending() or Consul.get_instance().are_nodes_restoring():
@@ -112,12 +112,17 @@ class Snapshot:
         os.makedirs(Snapshot.pendingPath)
 
         try:
+            Consul.get_instance().node_set_snapshotting_flag(snapshotting=True)
+
             # Create mysql backup
             backupUser = Utils.get_envvar_or_secret("MYSQL_BACKUP_USER")
             backupPass = Utils.get_envvar_or_secret("MYSQL_BACKUP_PASSWORD")
             xtrabackup = [Mysql.xtrabackup_binary, f"--user={backupUser}",
                         f"--password={backupPass}", "--backup",
                         f"--target-dir={Snapshot.pendingPath}"]
+
+            if not fromSource:
+                xtrabackup.append("--safe-slave-backup")
 
             subprocess.run(xtrabackup, check=True)
 
@@ -134,11 +139,14 @@ class Snapshot:
 
             move(Snapshot.pendingPath, Snapshot.currentPath)
 
+            Consul.get_instance().node_set_snapshotting_flag(snapshotting=False)
+
             logging.info("Snapshot was successfully created")
             return True
         except:
             logging.exception("Failed to create snapshot")
             Snapshot.resetPending()
+            Consul.get_instance().node_set_snapshotting_flag(snapshotting=False)
             return False
 
     @staticmethod

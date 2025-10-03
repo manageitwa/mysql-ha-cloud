@@ -27,6 +27,12 @@ class Proxysql:
         """
         logging.info("Performing initial ProxySQL setup")
 
+        # Set up MySQL variables
+        Proxysql.perform_sql_query("UPDATE global_variables SET variable_value='caching_sha2_password' "
+                                   "WHERE variable_name='mysql-default_authentication_plugin'")
+        Proxysql.perform_sql_query(f"UPDATE global_variables SET variable_value='{Utils.get_envvar('MYSQL_VERSION')}' "
+                                   "WHERE variable_name='mysql-server_version'")
+
         # Setup Monitoring User
         replication_user = Utils.get_envvar_or_secret("MYSQL_REPLICATION_USER")
         replication_password = Utils.get_envvar_or_secret("MYSQL_REPLICATION_PASSWORD")

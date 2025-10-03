@@ -1,5 +1,7 @@
-FROM mysql:8.4-oracle
+ARG MYSQL_VERSION=8.4.6
+FROM mysql:${MYSQL_VERSION}-oracle
 
+ENV MYSQL_VERSION=${MYSQL_VERSION}
 SHELL ["/bin/bash", "-c"]
 
 RUN \

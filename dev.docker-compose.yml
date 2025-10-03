@@ -9,6 +9,7 @@ services:
     environment:
       CONSUL_BOOTSTRAP_EXPECT: 3
       CONSUL_ENABLE_UI: "true"
+      SNAPSHOT_MINUTES: 3
 
       # Obviously, don't use these credentials in production
       MYSQL_ROOT_PASSWORD: root_pass

@@ -173,7 +173,7 @@ class Actions:
                 last_session_refresh = datetime.now()
 
             # Create MySQL Backups (using extra thread for backup)
-            if Utils.is_refresh_needed(last_backup_check, timedelta(minutes=5)):
+            if Utils.is_refresh_needed(last_backup_check, timedelta(minutes=1)):
                 Consul.get_instance().start_session_auto_refresh_thread()
                 Mysql.create_backup_if_needed()
                 last_backup_check = datetime.now()

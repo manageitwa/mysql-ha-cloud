@@ -57,5 +57,4 @@ services:
         failure_action: rollback
         order: start-first
     ports:
-      - 3307:3306
       - 3306:6033

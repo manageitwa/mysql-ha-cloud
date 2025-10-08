@@ -556,6 +556,39 @@ class Consul:
 
         return False
 
+    def are_nodes_snapshotting(self):
+        """
+        Check if any nodes are creating a snapshot
+        """
+
+        # Allow 3 minutes of retries
+        for _ in range(36):
+            try:
+                logging.debug("Check if any nodes are creating the snapshot")
+
+                result = self.client.kv.get(Consul.instances_path, recurse=True)
+                logging.debug("Got result %s", result)
+
+                if result[1] is not None:
+                    for node in result[1]:
+                        node_value = node['Value']
+                        node_data = json.loads(node_value)
+
+                        if not "snapshotting" in node_data:
+                            logging.error("Snapshotting flag missing in %s", node)
+                            continue
+
+                        if node_data["snapshotting"] is True:
+                            logging.debug("Node %s is snapshotting", node_data)
+                            return True
+
+                return False
+            except:
+                logging.warning("Unable to get registered nodes from Consul, retrying in 5 seconds")
+                time.sleep(5)
+
+        return False
+
     def refresh_sessions(self):
         """
         Refresh the active sessions

@@ -58,8 +58,9 @@ class Actions:
         # Register node
         Consul.get_instance().register_node()
 
-        logging.info("Init local node (leader=%s, backup=%s)",
-                     replication_leader, snapshotExists)
+        logging.info(
+            "Init local node (leader=%s, backup=%s)", replication_leader, snapshotExists
+        )
 
         needInitialSnapshot = False
 
@@ -71,7 +72,9 @@ class Actions:
             snapshotExists = Snapshot.waitForSnapshot()
 
             if not snapshotExists:
-                logging.error("No snapshot available, please check master logs or incomplete snapshot, exiting")
+                logging.error(
+                    "No snapshot available, please check master logs or incomplete snapshot, exiting"
+                )
                 sys.exit(1)
 
             Mysql.restore_backup_or_exit()
@@ -88,11 +91,14 @@ class Actions:
         Proxysql.inital_setup()
 
         # Get data from MySQL
-        mysql_version = Mysql.execute_query_as_root("SELECT version()")[0]['version()']
-        server_id = Mysql.execute_query_as_root("SELECT @@GLOBAL.server_id")[0]['@@GLOBAL.server_id']
+        mysql_version = Mysql.execute_query_as_root("SELECT version()")[0]["version()"]
+        server_id = Mysql.execute_query_as_root("SELECT @@GLOBAL.server_id")[0][
+            "@@GLOBAL.server_id"
+        ]
 
-        Consul.get_instance().populate_node_info(mysql_version=mysql_version,
-                                                 server_id=server_id)
+        Consul.get_instance().populate_node_info(
+            mysql_version=mysql_version, server_id=server_id
+        )
 
         # Remove the old replication configuration (e.g., from backup)
         Mysql.delete_replication_config()
@@ -108,10 +114,12 @@ class Actions:
             Snapshot.create(fromSource=True)
 
         # Run the main event loop
-        Actions.join_main_event_loop(consul_process, mysql_process)
+        Actions.consul_process = consul_process
+        Actions.mysql_process = mysql_process
+        Actions.join_main_event_loop()
 
     @staticmethod
-    def join_main_event_loop(consul_process, mysql_process):
+    def join_main_event_loop():
         """
         The main event loop for the join_or_bootstrap action
         """
@@ -127,11 +135,13 @@ class Actions:
         # to an extra thread. The loop needs to refresh the
         # Consul sessions every few seconds.
         while True:
-            consul_process.poll()
-            mysql_process.poll()
+            Actions.consul_process.poll()
+            Actions.mysql_process.poll()
 
             # Try to replace a failed replication leader
-            if Utils.is_refresh_needed(last_replication_leader_check, timedelta(seconds=5)):
+            if Utils.is_refresh_needed(
+                last_replication_leader_check, timedelta(seconds=5)
+            ):
                 last_replication_leader_check = datetime.now()
 
                 # Update ProxySQL nodes
@@ -143,7 +153,9 @@ class Actions:
                 # can become the new leader?)
                 if not able_to_become_leader:
                     if Mysql.is_repliation_data_processed():
-                        logging.info("All replication data are read, node can become replication leader")
+                        logging.info(
+                            "All replication data are read, node can become replication leader"
+                        )
                         able_to_become_leader = True
 
                 replication_leader = Consul.get_instance().is_replication_leader()
@@ -163,9 +175,12 @@ class Actions:
                     real_leader = Consul.get_instance().get_replication_leader_ip()
                     configured_leader = Mysql.get_replication_leader_ip()
 
-                    if (real_leader is not None and
-                        real_leader != configured_leader):
-                        logging.info("Replication leader change (old=%s, new=%s)", configured_leader, real_leader)
+                    if real_leader is not None and real_leader != configured_leader:
+                        logging.info(
+                            "Replication leader change (old=%s, new=%s)",
+                            configured_leader,
+                            real_leader,
+                        )
                         Mysql.change_to_replication_client(real_leader)
 
             # Keep Consul sessions alive
@@ -239,7 +254,7 @@ class Actions:
         Termination handler for the main event loop
         """
 
-        if (signum == signal.SIGCHLD):
+        if signum == signal.SIGCHLD:
             # Child process terminated, ignore
             return
 
@@ -251,7 +266,7 @@ class Actions:
 
         # Leave cluster and stop the consul agent
         if Actions.consul_process is not None:
-            subprocess.run(['consul', 'leave'])
+            subprocess.run(["consul", "leave"])
 
             Actions.consul_process.terminate()
 

@@ -23,7 +23,7 @@ class Snapshot:
             os.path.exists(Snapshot.currentPath),
             os.path.exists(f"{Snapshot.currentPath}/xtrabackup_checkpoints"),
             os.path.exists(f"{Snapshot.currentPath}/xtrabackup_binlog_info"),
-            os.path.exists(f"{Snapshot.currentPath}/xtrabackup_logfile")
+            os.path.exists(f"{Snapshot.currentPath}/xtrabackup_logfile"),
         ]
 
         return all(checkPaths)
@@ -56,7 +56,7 @@ class Snapshot:
             logging.debug(
                 "Still waiting for snapshot (%s, %s)",
                 Snapshot.isPending(),
-                Snapshot.exists()
+                Snapshot.exists(),
             )
 
             # Keep consul sessions alive
@@ -72,16 +72,18 @@ class Snapshot:
         retryCounter = 100
 
         for _ in range(retryCounter):
-            if (Snapshot.exists()
+            if (
+                Snapshot.exists()
                 and not Snapshot.isPending()
-                and not Consul.get_instance().are_nodes_restoring()):
+                and not Consul.get_instance().are_nodes_restoring()
+            ):
                 return True
 
             logging.debug(
                 "Still waiting for snapshot and restores (%s, %s, %s)",
                 Snapshot.isPending(),
                 Snapshot.exists(),
-                Consul.get_instance().are_nodes_restoring()
+                Consul.get_instance().are_nodes_restoring(),
             )
 
             # Keep consul sessions alive
@@ -109,7 +111,9 @@ class Snapshot:
 
         logging.info("Snapshotting MySQL into dir %s", Snapshot.pendingPath)
         if os.path.exists(Snapshot.pendingPath):
-            logging.warning("Snapshot path %s already exists, removing", Snapshot.pendingPath)
+            logging.warning(
+                "Snapshot path %s already exists, removing", Snapshot.pendingPath
+            )
             rmtree(Snapshot.pendingPath)
 
         # Crate backup dir
@@ -122,9 +126,13 @@ class Snapshot:
             # Create mysql backup
             backupUser = Utils.get_envvar_or_secret("MYSQL_BACKUP_USER")
             backupPass = Utils.get_envvar_or_secret("MYSQL_BACKUP_PASSWORD")
-            xtrabackup = [Mysql.xtrabackup_binary, f"--user={backupUser}",
-                        f"--password={backupPass}", "--backup",
-                        f"--target-dir={Snapshot.pendingPath}"]
+            xtrabackup = [
+                Mysql.xtrabackup_binary,
+                f"--user={backupUser}",
+                f"--password={backupPass}",
+                "--backup",
+                f"--target-dir={Snapshot.pendingPath}",
+            ]
 
             if not fromSource:
                 xtrabackup.append("--safe-slave-backup")
@@ -132,8 +140,11 @@ class Snapshot:
             subprocess.run(xtrabackup, check=True)
 
             # Prepare backup
-            xtrabackup_prepare = [Mysql.xtrabackup_binary, "--prepare",
-                                f"--target-dir={Snapshot.pendingPath}"]
+            xtrabackup_prepare = [
+                Mysql.xtrabackup_binary,
+                "--prepare",
+                f"--target-dir={Snapshot.pendingPath}",
+            ]
 
             subprocess.run(xtrabackup_prepare, check=True)
 
@@ -198,12 +209,15 @@ class Snapshot:
                 logging.info("Old MySQL data moved to: %s", oldMysqlDir)
 
             # Restore backup
-            xtrabackup = [Mysql.xtrabackup_binary, "--copy-back",
-                        f"--target-dir={Snapshot.currentPath}"]
+            xtrabackup = [
+                Mysql.xtrabackup_binary,
+                "--copy-back",
+                f"--target-dir={Snapshot.currentPath}",
+            ]
             subprocess.run(xtrabackup, check=True)
 
             # Change permissions of the restored data
-            chown = ['chown', 'mysql.mysql', '-R', '/var/lib/mysql/']
+            chown = ["chown", "mysql.mysql", "-R", "/var/lib/mysql/"]
             subprocess.run(chown, check=True)
 
             # Delete backup MySQL directory

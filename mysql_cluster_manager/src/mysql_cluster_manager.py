@@ -16,7 +16,8 @@ from mcm.utils import Utils
 
 parser = argparse.ArgumentParser(
     description="MySQL cluster manager",
-    epilog="For more info, please see: https://github.com/jnidzwetzki/mysql-ha-cloud")
+    epilog="For more info, please see: https://github.com/jnidzwetzki/mysql-ha-cloud",
+)
 
 AVAILABLE_OPERATIONS = [
     "join_or_bootstrap",
@@ -30,41 +31,49 @@ AVAILABLE_OPERATIONS = [
 ]
 
 parser.add_argument(
-    'operation', metavar = 'operation',
-    help = f'Operation to be executed ({AVAILABLE_OPERATIONS})')
+    "operation",
+    metavar="operation",
+    help=f"Operation to be executed ({AVAILABLE_OPERATIONS})",
+)
 
-log_levels = ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
-parser.add_argument('--log-level', default = 'INFO',choices = log_levels)
+log_levels = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+parser.add_argument("--log-level", default="INFO", choices=log_levels)
 
 # Parse args
 args = parser.parse_args()
 
 # Configure logging
 logging.basicConfig(
-    level = args.log_level,
-    format = '%(asctime)-15s %(levelname)s %(name)s %(message)s'
+    level=args.log_level, format="%(asctime)-15s %(levelname)s %(name)s %(message)s"
 )
 
 # Check for all needed env vars
-required_envvars_or_secrets = ['MYSQL_ROOT_PASSWORD', 'MYSQL_BACKUP_USER',
-                               'MYSQL_BACKUP_PASSWORD',
-                               'MYSQL_REPLICATION_USER',
-                               'MYSQL_REPLICATION_PASSWORD','MYSQL_USER',
-                               'MYSQL_PASSWORD']
+required_envvars_or_secrets = [
+    "MYSQL_ROOT_PASSWORD",
+    "MYSQL_BACKUP_USER",
+    "MYSQL_BACKUP_PASSWORD",
+    "MYSQL_REPLICATION_USER",
+    "MYSQL_REPLICATION_PASSWORD",
+    "MYSQL_USER",
+    "MYSQL_PASSWORD",
+]
 
 for required_var in required_envvars_or_secrets:
     try:
         Utils.get_envvar_or_secret(required_var)
     except Exception:
         logging.error(
-            "Missing required environment variable \"%s\" - please define environment variable \"%s\" or environment file \"%s\"_FILE",
+            'Missing required environment variable "%s" - please define environment variable "%s" or environment file "%s"_FILE',
             required_var,
             required_var,
-            required_var)
+            required_var,
+        )
         sys.exit(1)
 
+logging.info("Starting MySQL cluster manager with operation: %s", args.operation)
+
 # Perform operations
-if args.operation == 'join_or_bootstrap':
+if args.operation == "join_or_bootstrap":
     signal.signal(signal.SIGTERM, Actions.terminate_handler)
     Actions.join_or_bootstrap()
 elif args.operation == "execute_file":
@@ -72,15 +81,15 @@ elif args.operation == "execute_file":
     Actions.execute_file()
 elif args.operation == "mysql_backup":
     Snapshot.create()
-elif args.operation == 'mysql_restore':
+elif args.operation == "mysql_restore":
     Snapshot.restore()
-elif args.operation == 'mysql_start':
+elif args.operation == "mysql_start":
     Mysql.server_start()
-elif args.operation == 'mysql_stop':
+elif args.operation == "mysql_stop":
     Mysql.server_stop()
-elif args.operation == 'mysql_autobackup':
+elif args.operation == "mysql_autobackup":
     Mysql.create_backup_if_needed()
-elif args.operation == 'proxysql_init':
+elif args.operation == "proxysql_init":
     Proxysql.inital_setup()
     nodes = Consul.get_instance().get_all_registered_nodes()
     Proxysql.set_mysql_server(nodes)

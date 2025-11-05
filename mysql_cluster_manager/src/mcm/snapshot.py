@@ -39,9 +39,18 @@ class Snapshot:
 
     @staticmethod
     def isPending():
-        """Check if a snapshot is pending or someone is restoring from Snapshot"""
+        """Check if a snapshot is pending"""
 
-        return os.path.exists(Snapshot.pendingPath)
+        if not os.path.exists(Snapshot.pendingPath):
+            return False
+
+        # Check if any node is snapshotting in Consul
+        if Consul.get_instance().are_nodes_snapshotting():
+            return True
+
+        # No node is snapshotting according to Consul, reset pending snapshot
+        Snapshot.resetPending()
+        return False
 
     @staticmethod
     def waitForSnapshot():

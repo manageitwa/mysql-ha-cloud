@@ -2,25 +2,32 @@
 
 """This file is part of the MySQL cluster manager"""
 
-import sys
-import logging
 import argparse
+import logging
 import signal
+import sys
 
 from mcm.actions import Actions
 from mcm.consul import Consul
 from mcm.mysql import Mysql
 from mcm.proxysql import Proxysql
-from mcm.utils import Utils
 from mcm.snapshot import Snapshot
+from mcm.utils import Utils
 
 parser = argparse.ArgumentParser(
     description="MySQL cluster manager",
     epilog="For more info, please see: https://github.com/jnidzwetzki/mysql-ha-cloud")
 
-AVAILABLE_OPERATIONS = ['join_or_bootstrap', 'mysql_backup', 'mysql_restore',
-                        'mysql_start','mysql_stop','mysql_autobackup',
-                        'proxysql_init']
+AVAILABLE_OPERATIONS = [
+    "join_or_bootstrap",
+    "mysql_backup",
+    "mysql_restore",
+    "mysql_start",
+    "mysql_stop",
+    "mysql_autobackup",
+    "proxysql_init",
+    "execute_file",
+]
 
 parser.add_argument(
     'operation', metavar = 'operation',
@@ -60,7 +67,10 @@ for required_var in required_envvars_or_secrets:
 if args.operation == 'join_or_bootstrap':
     signal.signal(signal.SIGTERM, Actions.terminate_handler)
     Actions.join_or_bootstrap()
-elif args.operation == 'mysql_backup':
+elif args.operation == "execute_file":
+    signal.signal(signal.SIGTERM, Actions.terminate_handler)
+    Actions.execute_file()
+elif args.operation == "mysql_backup":
     Snapshot.create()
 elif args.operation == 'mysql_restore':
     Snapshot.restore()

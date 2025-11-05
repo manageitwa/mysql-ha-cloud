@@ -1,12 +1,11 @@
 """This file is part of the MySQL cluster manager"""
 
-import os
-import sys
-import time
 import logging
-import threading
+import os
 import subprocess
-
+import sys
+import threading
+import time
 from datetime import timedelta
 
 import mysql.connector
@@ -14,8 +13,8 @@ import mysql.connector
 from mcm.consul import Consul
 from mcm.utils import Utils
 
-class Mysql:
 
+class Mysql:
     """
     This class encapsulates all MySQL related things
     """
@@ -41,7 +40,9 @@ class Mysql:
         subprocess.run(mysql_init, check=True)
 
         # Start server the first time
-        mysql_process = Mysql.server_start(use_root_password=False)
+        mysql_process = Mysql.server_start(
+            use_root_password=False, skip_config_build=True
+        )
 
         # Create application user
         logging.debug("Creating MySQL user for the application")
@@ -230,14 +231,15 @@ class Mysql:
         return True
 
     @staticmethod
-    def server_start(use_root_password=True):
+    def server_start(use_root_password=True, skip_config_build=False):
         """
         Start the MySQL server and wait for ready to serve connections.
         """
 
         logging.info("Starting MySQL")
 
-        Mysql.build_configuration()
+        if not skip_config_build:
+            Mysql.build_configuration()
 
         mysql_server = [Mysql.mysql_server_binary, "--user=mysql"]
         mysql_process = subprocess.Popen(mysql_server)

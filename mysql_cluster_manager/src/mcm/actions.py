@@ -1,18 +1,19 @@
 """This file contains the actions of the cluster manager"""
 
-import sys
-import time
 import logging
+import os
 import signal
 import subprocess
-
-from datetime import timedelta, datetime
+import sys
+import time
+from datetime import datetime, timedelta
 
 from mcm.consul import Consul
 from mcm.mysql import Mysql
 from mcm.proxysql import Proxysql
-from mcm.utils import Utils
 from mcm.snapshot import Snapshot
+from mcm.utils import Utils
+
 
 class Actions:
     """The actions of the application"""
@@ -180,6 +181,57 @@ class Actions:
                 Consul.get_instance().stop_session_auto_refresh_thread()
 
             time.sleep(1)
+
+    @staticmethod
+    def execute_file():
+        """
+        Execute an SQL file on the MySQL server and prime the snapshot
+        """
+        # Check if we have an existing backup to restore
+        if Snapshot.exists():
+            logging.warning("Snapshot already exists, this will be overwritten")
+
+        Mysql.init_database_if_needed()
+
+        # Start MySQL
+        Actions.mysql_process = Mysql.server_start(skip_config_build=True)
+
+        # Run a subprocess to execute the SQL file
+        try:
+            sql_file_path = Utils.get_envvar_or_secret("SQL_FILE_PATH")
+            if not sql_file_path or not os.path.isfile(sql_file_path):
+                raise Exception(
+                    "SQL_FILE_PATH is not defined or the file does not exist"
+                )
+        except Exception:
+            logging.error(
+                "SQL_FILE_PATH environment variable not set or file does not exist"
+            )
+            sys.exit(1)
+
+        logging.info("Executing SQL file %s", sql_file_path)
+
+        process = subprocess.Popen(
+            [
+                "mysql",
+                "-u",
+                Utils.get_envvar_or_secret("MYSQL_USER"),
+                "-p" + Utils.get_envvar_or_secret("MYSQL_PASSWORD"),
+                "-D",
+                Utils.get_envvar_or_secret("MYSQL_DATABASE"),
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        output = process.communicate("source " + sql_file_path)
+        response = output[0]
+        errors = output[1]
+        logging.debug("SQL file executed, output: %s, errors: %s", response, errors)
+
+        Snapshot.create(fromSource=True, force=True)
+        Mysql.server_stop()
 
     @staticmethod
     def terminate_handler(signum, frame):

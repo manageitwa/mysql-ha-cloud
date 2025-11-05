@@ -1,17 +1,17 @@
 """This file contains the Snapshot related actions"""
 
-import os
-import time
 import logging
+import os
 import subprocess
+import time
+from shutil import move, rmtree
 
-from shutil import rmtree, move
-from mcm.utils import Utils
-from mcm.mysql import Mysql
 from mcm.consul import Consul
+from mcm.mysql import Mysql
+from mcm.utils import Utils
+
 
 class Snapshot:
-
     pendingPath = "/snapshots/pending"
     currentPath = "/snapshots/current"
 
@@ -91,11 +91,15 @@ class Snapshot:
         return False
 
     @staticmethod
-    def create(fromSource = False):
+    def create(fromSource=False, force=False):
         """Create a snapshot"""
 
-        if Snapshot.isPending() or Consul.get_instance().are_nodes_restoring():
-            logging.info("Pending snapshot or restore, wait for it to complete before creating a new snapshot")
+        if not force and (
+            Snapshot.isPending() or Consul.get_instance().are_nodes_restoring()
+        ):
+            logging.info(
+                "Pending snapshot or restore, wait for it to complete before creating a new snapshot"
+            )
 
             finished = Snapshot.waitForSnapshotAndRestores()
 
@@ -112,7 +116,8 @@ class Snapshot:
         os.makedirs(Snapshot.pendingPath)
 
         try:
-            Consul.get_instance().node_set_snapshotting_flag(snapshotting=True)
+            if not force:
+                Consul.get_instance().node_set_snapshotting_flag(snapshotting=True)
 
             # Create mysql backup
             backupUser = Utils.get_envvar_or_secret("MYSQL_BACKUP_USER")
@@ -139,14 +144,16 @@ class Snapshot:
 
             move(Snapshot.pendingPath, Snapshot.currentPath)
 
-            Consul.get_instance().node_set_snapshotting_flag(snapshotting=False)
+            if not force:
+                Consul.get_instance().node_set_snapshotting_flag(snapshotting=False)
 
             logging.info("Snapshot was successfully created")
             return True
         except:
             logging.exception("Failed to create snapshot")
             Snapshot.resetPending()
-            Consul.get_instance().node_set_snapshotting_flag(snapshotting=False)
+            if not force:
+                Consul.get_instance().node_set_snapshotting_flag(snapshotting=False)
             return False
 
     @staticmethod

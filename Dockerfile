@@ -7,29 +7,29 @@ SHELL ["/bin/bash", "-c"]
 RUN \
     # Install dependencies
     microdnf install -y \
-        libev \
-        lz4 \
-        perl \
-        perl-DBI \
-        perl-DBD-MySQL \
-        procps \
-        python3-devel \
-        rsync \
-        unzip \
-        wget && \
+    libev \
+    lz4 \
+    perl \
+    perl-DBI \
+    perl-DBD-MySQL \
+    procps \
+    python3-devel \
+    rsync \
+    unzip \
+    wget && \
     # Install Percona XtraBackup
     wget https://downloads.percona.com/downloads/Percona-XtraBackup-8.4/Percona-XtraBackup-8.4.0-4/binary/redhat/9/x86_64/percona-xtrabackup-84-8.4.0-4.1.el9.x86_64.rpm -O /tmp/xtrabackup.rpm && \
     rpm -i /tmp/xtrabackup.rpm && \
     rm /tmp/xtrabackup.rpm && \
     # Install Consul CLI
-    wget https://releases.hashicorp.com/consul/1.21.5/consul_1.21.5_linux_amd64.zip -O /tmp/consul.zip && \
-    echo "2dfb63fcabe9f15b956cf408248d9ebe36cfd662ca182352942a3bd4e5d5faca /tmp/consul.zip" | sha256sum -c && \
+    wget https://releases.hashicorp.com/consul/1.22.0/consul_1.22.0_linux_amd64.zip -O /tmp/consul.zip && \
+    echo "9891495a2defabc3d637b376c66550e9879102868fbe6456a9a683067ae20ae9 /tmp/consul.zip" | sha256sum -c && \
     unzip /tmp/consul.zip -d /usr/local/bin && \
     rm /usr/local/bin/LICENSE.txt && \
     rm /tmp/consul.zip && \
     # Install ProxySQL
-    wget https://github.com/sysown/proxysql/releases/download/v3.0.2/proxysql-3.0.2-1-centos9.x86_64.rpm -O /tmp/proxysql.rpm && \
-    echo "b94d24dc7e4608e3b2006a43d7a1b112143d3fe108baee5136db1f7341d3aedf /tmp/proxysql.rpm" | sha256sum -c && \
+    wget https://github.com/sysown/proxysql/releases/download/v3.0.3/proxysql-3.0.3-1-centos9.x86_64.rpm -O /tmp/proxysql.rpm && \
+    echo "6d02e80e9d29e4141e48b5ef733ed762d1957ec0b01dc57e0116bd945a1fe83d /tmp/proxysql.rpm" | sha256sum -c && \
     rpm -i /tmp/proxysql.rpm && \
     rm /tmp/proxysql.rpm && \
     # Create directories for Cluster Manager and snapshot

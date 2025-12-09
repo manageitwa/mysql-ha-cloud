@@ -85,7 +85,7 @@ class Proxysql:
                                    f"VALUES ('{application_user}', '{application_password}', '{use_ssl}', 1)")
 
         # Persist and activate config
-        Proxysql.persist_and_activate_config()
+        Proxysql.activate_config()
 
         # Copy TLS files to the right place for ProxySQL and initialise TLS
         if (Utils.get_envvar('MYSQL_TLS_CA')
@@ -103,9 +103,8 @@ class Proxysql:
 
             Proxysql.perform_sql_query("PROXYSQL RELOAD TLS")
 
-
     @staticmethod
-    def persist_and_activate_config():
+    def activate_config():
         """
         Persist and activate the ProxySQL configuration
         """
@@ -113,11 +112,6 @@ class Proxysql:
         Proxysql.perform_sql_query("LOAD MYSQL SERVERS TO RUNTIME")
         Proxysql.perform_sql_query("LOAD MYSQL USERS TO RUNTIME")
         Proxysql.perform_sql_query("LOAD MYSQL QUERY RULES TO RUNTIME")
-
-        Proxysql.perform_sql_query("SAVE MYSQL VARIABLES TO DISK")
-        Proxysql.perform_sql_query("SAVE MYSQL SERVERS TO DISK")
-        Proxysql.perform_sql_query("SAVE MYSQL USERS TO DISK")
-        Proxysql.perform_sql_query("SAVE MYSQL QUERY RULES TO DISK")
 
     @staticmethod
     def set_mysql_server(mysql_servers):
@@ -141,7 +135,6 @@ class Proxysql:
                                        f"VALUES (1, '{mysql_server}', 3306, {use_ssl})")
 
         Proxysql.perform_sql_query("LOAD MYSQL SERVERS TO RUNTIME")
-        Proxysql.perform_sql_query("SAVE MYSQL SERVERS TO DISK")
 
     def update_mysql_server_if_needed(self, current_mysql_servers):
         """

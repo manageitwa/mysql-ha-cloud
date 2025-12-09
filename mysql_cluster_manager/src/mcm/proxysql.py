@@ -8,6 +8,7 @@ import time
 from mcm.mysql import Mysql
 from mcm.utils import Utils
 
+
 class Proxysql:
     """
     This class encapsulates all ProxySQL related things
@@ -19,7 +20,6 @@ class Proxysql:
         """
         self.configured_mysql_hosts = ()
 
-
     @staticmethod
     def inital_setup():
         """
@@ -27,79 +27,132 @@ class Proxysql:
         """
         logging.info("Performing initial ProxySQL setup")
 
+        # Change admin password if needed
+        if Utils.get_envvar_or_secret("PROXYSQL_ADMIN_PASSWORD", "admin") != "admin":
+            Mysql.execute_statement_or_exit(
+                sql=f"UPDATE global_variables SET variable_valu='admin:{Utils.get_envvar_or_secret('PROXYSQL_ADMIN_PASSWORD', 'admin')}' "
+                "WHERE variable_name='admin-admin_credentials'",
+                username="admin",
+                password="admin",
+                database="",
+                port=6032,
+            )
+            Mysql.execute_statement_or_exit(
+                sql="LOAD ADMIN VARIABLES TO RUNTIME",
+                username="admin",
+                password="admin",
+                database="",
+                port=6032,
+            )
+
         # Set up MySQL variables
-        Proxysql.perform_sql_query("UPDATE global_variables SET variable_value='caching_sha2_password' "
-                                   "WHERE variable_name='mysql-default_authentication_plugin'")
-        Proxysql.perform_sql_query(f"UPDATE global_variables SET variable_value='{Utils.get_envvar('MYSQL_VERSION')}' "
-                                   "WHERE variable_name='mysql-server_version'")
+        Proxysql.perform_sql_query(
+            "UPDATE global_variables SET variable_value='caching_sha2_password' "
+            "WHERE variable_name='mysql-default_authentication_plugin'"
+        )
+        Proxysql.perform_sql_query(
+            f"UPDATE global_variables SET variable_value='{Utils.get_envvar('MYSQL_VERSION')}' "
+            "WHERE variable_name='mysql-server_version'"
+        )
 
         # Setup Monitoring User
         replication_user = Utils.get_envvar_or_secret("MYSQL_REPLICATION_USER")
         replication_password = Utils.get_envvar_or_secret("MYSQL_REPLICATION_PASSWORD")
 
-        Proxysql.perform_sql_query(f"UPDATE global_variables SET variable_value='{replication_user}' "
-                                   "WHERE variable_name='mysql-monitor_username'")
-        Proxysql.perform_sql_query(f"UPDATE global_variables SET variable_value='{replication_password}' "
-                                   "WHERE variable_name='mysql-monitor_password'")
+        Proxysql.perform_sql_query(
+            f"UPDATE global_variables SET variable_value='{replication_user}' "
+            "WHERE variable_name='mysql-monitor_username'"
+        )
+        Proxysql.perform_sql_query(
+            f"UPDATE global_variables SET variable_value='{replication_password}' "
+            "WHERE variable_name='mysql-monitor_password'"
+        )
 
         # Enable TLS for MySQL backend connections if needed
-        if (Utils.get_envvar('MYSQL_TLS_CA')
-            and Utils.get_envvar('MYSQL_TLS_CERT')
-            and Utils.get_envvar('MYSQL_TLS_KEY')
+        if (
+            Utils.get_envvar("MYSQL_TLS_CA", False)
+            and Utils.get_envvar("MYSQL_TLS_CERT", False)
+            and Utils.get_envvar("MYSQL_TLS_KEY", False)
         ):
-            Proxysql.perform_sql_query(f"UPDATE global_variables SET variable_value='{Utils.get_envvar('MYSQL_TLS_CA')}' "
-                                        "WHERE variable_name='mysql-ssl_p2s_ca'")
-            Proxysql.perform_sql_query(f"UPDATE global_variables SET variable_value='{Utils.get_envvar('MYSQL_TLS_CERT')}' "
-                                        "WHERE variable_name='mysql-ssl_p2s_cert'")
-            Proxysql.perform_sql_query(f"UPDATE global_variables SET variable_value='{Utils.get_envvar('MYSQL_TLS_KEY')}' "
-                                        "WHERE variable_name='mysql-ssl_p2s_key'")
+            Proxysql.perform_sql_query(
+                f"UPDATE global_variables SET variable_value='{Utils.get_envvar('MYSQL_TLS_CA')}' "
+                "WHERE variable_name='mysql-ssl_p2s_ca'"
+            )
+            Proxysql.perform_sql_query(
+                f"UPDATE global_variables SET variable_value='{Utils.get_envvar('MYSQL_TLS_CERT')}' "
+                "WHERE variable_name='mysql-ssl_p2s_cert'"
+            )
+            Proxysql.perform_sql_query(
+                f"UPDATE global_variables SET variable_value='{Utils.get_envvar('MYSQL_TLS_KEY')}' "
+                "WHERE variable_name='mysql-ssl_p2s_key'"
+            )
 
         # Configure read write hostgroup (writer = 1, reader = 2)
         Proxysql.perform_sql_query("DELETE FROM mysql_replication_hostgroups")
-        Proxysql.perform_sql_query("INSERT INTO mysql_replication_hostgroups "
-                                   "(writer_hostgroup, reader_hostgroup,comment) VALUES (1, 2, 'cluster1')")
+        Proxysql.perform_sql_query(
+            "INSERT INTO mysql_replication_hostgroups "
+            "(writer_hostgroup, reader_hostgroup,comment) VALUES (1, 2, 'cluster1')"
+        )
 
         # Configure read write split
-        Proxysql.perform_sql_query("INSERT INTO mysql_query_rules (active, match_digest, "
-                                   "destination_hostgroup, apply) VALUES (1, '^SELECT.*', 2, 0)")
-        Proxysql.perform_sql_query("INSERT INTO mysql_query_rules (active, match_digest, "
-                                   "destination_hostgroup, apply) VALUES (1, '^SELECT.*FOR UPDATE', 1, 1)")
+        Proxysql.perform_sql_query(
+            "INSERT INTO mysql_query_rules (active, match_digest, "
+            "destination_hostgroup, apply) VALUES (1, '^SELECT.*', 2, 0)"
+        )
+        Proxysql.perform_sql_query(
+            "INSERT INTO mysql_query_rules (active, match_digest, "
+            "destination_hostgroup, apply) VALUES (1, '^SELECT.*FOR UPDATE', 1, 1)"
+        )
 
         # Configure Application User
         application_user = Utils.get_envvar_or_secret("MYSQL_USER")
         application_password = Utils.get_envvar_or_secret("MYSQL_PASSWORD")
 
         # Force SSL/TLS for application connections if needed
-        if (Utils.get_envvar('MYSQL_TLS_CA')
-            and Utils.get_envvar('MYSQL_TLS_CERT')
-            and Utils.get_envvar('MYSQL_TLS_KEY')
-            and (Utils.get_envvar_or_secret("MYSQL_TLS_REQUIRED", "True").lower() == "true" or
-                Utils.get_envvar_or_secret("MYSQL_TLS_REQUIRED", "True") == "1")
+        if (
+            Utils.get_envvar("MYSQL_TLS_CA", False)
+            and Utils.get_envvar("MYSQL_TLS_CERT", False)
+            and Utils.get_envvar("MYSQL_TLS_KEY", False)
+            and (
+                Utils.get_envvar_or_secret("MYSQL_TLS_REQUIRED", "True").lower()
+                == "true"
+                or Utils.get_envvar_or_secret("MYSQL_TLS_REQUIRED", "True") == "1"
+            )
         ):
             use_ssl = 1
         else:
             use_ssl = 0
 
         Proxysql.perform_sql_query("DELETE FROM mysql_users")
-        Proxysql.perform_sql_query("INSERT INTO mysql_users(username, password, use_ssl, default_hostgroup) "
-                                   f"VALUES ('{application_user}', '{application_password}', '{use_ssl}', 1)")
+        Proxysql.perform_sql_query(
+            "INSERT INTO mysql_users(username, password, use_ssl, default_hostgroup) "
+            f"VALUES ('{application_user}', '{application_password}', '{use_ssl}', 1)"
+        )
 
         # Persist and activate config
         Proxysql.activate_config()
 
         # Copy TLS files to the right place for ProxySQL and initialise TLS
-        if (Utils.get_envvar('MYSQL_TLS_CA')
-            and Utils.get_envvar('MYSQL_TLS_CERT')
-            and Utils.get_envvar('MYSQL_TLS_KEY')
+        if (
+            Utils.get_envvar("MYSQL_TLS_CA", False)
+            and Utils.get_envvar("MYSQL_TLS_CERT", False)
+            and Utils.get_envvar("MYSQL_TLS_KEY", False)
         ):
             time.sleep(1)
 
             os.remove("/var/lib/proxysql/proxysql-ca.pem")
             os.remove("/var/lib/proxysql/proxysql-cert.pem")
             os.remove("/var/lib/proxysql/proxysql-key.pem")
-            os.symlink(Utils.get_envvar('MYSQL_TLS_CA'), "/var/lib/proxysql/proxysql-ca.pem")
-            os.symlink(Utils.get_envvar('MYSQL_TLS_CERT'), "/var/lib/proxysql/proxysql-cert.pem")
-            os.symlink(Utils.get_envvar('MYSQL_TLS_KEY'), "/var/lib/proxysql/proxysql-key.pem")
+            os.symlink(
+                Utils.get_envvar("MYSQL_TLS_CA"), "/var/lib/proxysql/proxysql-ca.pem"
+            )
+            os.symlink(
+                Utils.get_envvar("MYSQL_TLS_CERT"),
+                "/var/lib/proxysql/proxysql-cert.pem",
+            )
+            os.symlink(
+                Utils.get_envvar("MYSQL_TLS_KEY"), "/var/lib/proxysql/proxysql-key.pem"
+            )
 
             Proxysql.perform_sql_query("PROXYSQL RELOAD TLS")
 
@@ -123,16 +176,19 @@ class Proxysql:
 
         for mysql_server in mysql_servers:
             logging.info("Adding %s as backend MySQL Server", mysql_server)
-            if (Utils.get_envvar('MYSQL_TLS_CA')
-                and Utils.get_envvar('MYSQL_TLS_CERT')
-                and Utils.get_envvar('MYSQL_TLS_KEY')
+            if (
+                Utils.get_envvar("MYSQL_TLS_CA", False)
+                and Utils.get_envvar("MYSQL_TLS_CERT", False)
+                and Utils.get_envvar("MYSQL_TLS_KEY", False)
             ):
                 use_ssl = 1
             else:
                 use_ssl = 0
 
-            Proxysql.perform_sql_query("INSERT INTO mysql_servers(hostgroup_id, hostname, port, use_ssl) "
-                                       f"VALUES (1, '{mysql_server}', 3306, {use_ssl})")
+            Proxysql.perform_sql_query(
+                "INSERT INTO mysql_servers(hostgroup_id, hostname, port, use_ssl) "
+                f"VALUES (1, '{mysql_server}', 3306, {use_ssl})"
+            )
 
         Proxysql.perform_sql_query("LOAD MYSQL SERVERS TO RUNTIME")
 
@@ -143,8 +199,11 @@ class Proxysql:
         current_mysql_servers.sort()
 
         if self.configured_mysql_hosts != current_mysql_servers:
-            logging.info("MySQL backend has changed (old=%s, new=%s), reconfiguring",
-                         self.configured_mysql_hosts, current_mysql_servers)
+            logging.info(
+                "MySQL backend has changed (old=%s, new=%s), reconfiguring",
+                self.configured_mysql_hosts,
+                current_mysql_servers,
+            )
             Proxysql.set_mysql_server(current_mysql_servers)
             self.configured_mysql_hosts = current_mysql_servers
             return True
@@ -156,7 +215,13 @@ class Proxysql:
         """
         Perform a SQL query
         """
-        Mysql.execute_statement_or_exit(sql=sql, username="admin", password="admin", database="", port=6032)
+        Mysql.execute_statement_or_exit(
+            sql=sql,
+            username="admin",
+            password=Utils.get_envvar_or_secret("PROXYSQL_ADMIN_PASSWORD", "admin"),
+            database="",
+            port=6032,
+        )
 
     @staticmethod
     def start_proxysql():
@@ -165,7 +230,13 @@ class Proxysql:
         """
 
         # Init proxysql
-        proxysql_init = ["/usr/bin/proxysql", "--idle-threads", "-c", "/etc/proxysql.cnf", "--initial"]
+        proxysql_init = [
+            "/usr/bin/proxysql",
+            "--idle-threads",
+            "-c",
+            "/etc/proxysql.cnf",
+            "--initial",
+        ]
         subprocess.run(proxysql_init, check=True)
 
         return True

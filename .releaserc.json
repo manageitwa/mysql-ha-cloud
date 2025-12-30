@@ -1,0 +1,13 @@
+{
+  "plugins": [
+    "@semantic-release/commit-analyzer",
+    "@semantic-release/release-notes-generator",
+    "@semantic-release/github",
+    [
+      "@semantic-release/exec",
+      {
+        "successCmd": "gh workflow run publish-docker-image.yml --ref v${nextRelease.version}"
+      }
+    ]
+  ]
+}

@@ -145,9 +145,9 @@ class Mysql:
         outfile.write("enforce-gtid-consistency=ON\n")
 
         if (
-            Utils.get_envvar("MYSQL_TLS_CA")
-            and Utils.get_envvar("MYSQL_TLS_CERT")
-            and Utils.get_envvar("MYSQL_TLS_KEY")
+            Utils.get_envvar("MYSQL_TLS_CA", False)
+            and Utils.get_envvar("MYSQL_TLS_CERT", False)
+            and Utils.get_envvar("MYSQL_TLS_KEY", False)
         ):
             outfile.write(f"ssl_ca={Utils.get_envvar('MYSQL_TLS_CA')}\n")
             outfile.write(f"ssl_cert={Utils.get_envvar('MYSQL_TLS_CERT')}\n")
@@ -175,9 +175,9 @@ class Mysql:
         Mysql.execute_query_as_root("STOP REPLICA", discard_result=True)
 
         if (
-            Utils.get_envvar("MYSQL_TLS_CA")
-            and Utils.get_envvar("MYSQL_TLS_CERT")
-            and Utils.get_envvar("MYSQL_TLS_KEY")
+            Utils.get_envvar("MYSQL_TLS_CA", False)
+            and Utils.get_envvar("MYSQL_TLS_CERT", False)
+            and Utils.get_envvar("MYSQL_TLS_KEY", False)
         ):
             Mysql.execute_query_as_root(
                 f"CHANGE REPLICATION SOURCE TO SOURCE_HOST = '{leader_ip}', "

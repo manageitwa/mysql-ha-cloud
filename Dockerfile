@@ -1,4 +1,4 @@
-ARG MYSQL_VERSION=8.4.6
+ARG MYSQL_VERSION=8.4.7
 FROM mysql:${MYSQL_VERSION}-oracle
 
 ENV MYSQL_VERSION=${MYSQL_VERSION}
@@ -22,8 +22,8 @@ RUN \
     rpm -i /tmp/xtrabackup.rpm && \
     rm /tmp/xtrabackup.rpm && \
     # Install Consul CLI
-    wget https://releases.hashicorp.com/consul/1.22.0/consul_1.22.0_linux_amd64.zip -O /tmp/consul.zip && \
-    echo "9891495a2defabc3d637b376c66550e9879102868fbe6456a9a683067ae20ae9 /tmp/consul.zip" | sha256sum -c && \
+    wget https://releases.hashicorp.com/consul/1.22.1/consul_1.22.1_linux_amd64.zip -O /tmp/consul.zip && \
+    echo "91222c7ec141f1c2c92f6b732eeb0251220337e4c07c768cbc6ae633fef69733 /tmp/consul.zip" | sha256sum -c && \
     unzip /tmp/consul.zip -d /usr/local/bin && \
     rm /usr/local/bin/LICENSE.txt && \
     rm /tmp/consul.zip && \

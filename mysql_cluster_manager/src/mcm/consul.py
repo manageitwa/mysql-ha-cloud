@@ -1,20 +1,20 @@
 """This file is part of the MySQL cluster manager"""
 
-import sys
-import time
 import json
 import logging
-import threading
-import subprocess
 import socket
+import subprocess
+import sys
+import threading
+import time
 
-import netifaces
 import consul as pyconsul
+import netifaces
 
 from mcm.utils import Utils
 
-class Consul:
 
+class Consul:
     """
     This class encapsulates all Consul related things
     """
@@ -70,7 +70,7 @@ class Consul:
 
     @staticmethod
     def get_instance():
-        """ Static access method. """
+        """Static access method."""
         if Consul.__instance is None:
             return Consul()
 
@@ -82,7 +82,9 @@ class Consul:
         """
         logging.info("Starting the Consul session auto refresh thread")
         self.run_auto_refresh_thread = True
-        self.auto_refresh_thread = threading.Thread(target=self.auto_refresh_sessions, args=())
+        self.auto_refresh_thread = threading.Thread(
+            target=self.auto_refresh_sessions, args=()
+        )
         self.auto_refresh_thread.start()
 
     def auto_refresh_sessions(self):
@@ -117,19 +119,22 @@ class Consul:
         # Allow 30 seconds for session to be created
         for _ in range(6):
             try:
-                self.node_health_session = self.client.session.create(name=Consul.instances_session_key,
-                                                                      behavior='delete',
-                                                                      ttl=15,
-                                                                      lock_delay=0)
+                self.node_health_session = self.client.session.create(
+                    name=Consul.instances_session_key,
+                    behavior="delete",
+                    ttl=15,
+                    lock_delay=0,
+                )
 
                 return self.node_health_session
             except:
-                logging.warning("Unable to create a session in Consul, retrying in 5 seconds")
+                logging.warning(
+                    "Unable to create a session in Consul, retrying in 5 seconds"
+                )
                 time.sleep(5)
 
         if session is None:
             raise Exception("Unable to create node health session")
-
 
     def get_all_registered_nodes(self):
         """
@@ -145,7 +150,7 @@ class Consul:
 
                 if result[1] is not None:
                     for node in result[1]:
-                        node_value = node['Value']
+                        node_value = node["Value"]
                         node_data = json.loads(node_value)
 
                         if not "ip_address" in node_data:
@@ -153,11 +158,20 @@ class Consul:
                             continue
 
                         if "restoring" in node_data and node_data["restoring"] is True:
-                            logging.debug("Skipping node %s as it is currently restoring", node_data)
+                            logging.debug(
+                                "Skipping node %s as it is currently restoring",
+                                node_data,
+                            )
                             continue
 
-                        if "snapshotting" in node_data and node_data["snapshotting"] is True:
-                            logging.debug("Skipping node %s as it is currently snapshotting", node_data)
+                        if (
+                            "snapshotting" in node_data
+                            and node_data["snapshotting"] is True
+                        ):
+                            logging.debug(
+                                "Skipping node %s as it is currently snapshotting",
+                                node_data,
+                            )
                             continue
 
                         ip_address = node_data["ip_address"]
@@ -165,7 +179,9 @@ class Consul:
 
                 return mysql_nodes
             except:
-                logging.warning("Unable to get registered nodes from Consul, retrying in 5 seconds")
+                logging.warning(
+                    "Unable to get registered nodes from Consul, retrying in 5 seconds"
+                )
                 time.sleep(5)
 
         return mysql_nodes
@@ -186,13 +202,17 @@ class Consul:
 
                 # Create new key
                 if result[1] is None:
-                    logging.debug("Old serverkey %s not found, preparing new one",
-                                Consul.kv_server_id)
+                    logging.debug(
+                        "Old serverkey %s not found, preparing new one",
+                        Consul.kv_server_id,
+                    )
 
-                    json_string = json.dumps({'last_used_id': 1})
+                    json_string = json.dumps({"last_used_id": 1})
 
                     # Try to create
-                    put_result = self.client.kv.put(Consul.kv_server_id, json_string, cas=0)
+                    put_result = self.client.kv.put(
+                        Consul.kv_server_id, json_string, cas=0
+                    )
                     if put_result is True:
                         logging.debug("Created new key, started new server counter")
                         return 1
@@ -202,22 +222,28 @@ class Consul:
 
                 # Updating existing key
                 logging.debug("Updating existing key %s", result)
-                json_string = result[1]['Value']
-                version = result[1]['ModifyIndex']
+                json_string = result[1]["Value"]
+                version = result[1]["ModifyIndex"]
                 server_data = json.loads(json_string)
 
                 if not "last_used_id" in server_data:
-                    logging.error("Invalid JSON returned (missing last_used_id) %s",
-                                json_string)
+                    logging.error(
+                        "Invalid JSON returned (missing last_used_id) %s", json_string
+                    )
 
-                server_data['last_used_id'] = server_data['last_used_id'] + 1
+                server_data["last_used_id"] = server_data["last_used_id"] + 1
                 json_string = json.dumps(server_data)
-                put_result = self.client.kv.put(Consul.kv_server_id, json_string, cas=version)
+                put_result = self.client.kv.put(
+                    Consul.kv_server_id, json_string, cas=version
+                )
 
                 if put_result is True:
-                    logging.debug("Successfully updated consul value %s, new server_id is %i",
-                                put_result, server_data['last_used_id'])
-                    return server_data['last_used_id']
+                    logging.debug(
+                        "Successfully updated consul value %s, new server_id is %i",
+                        put_result,
+                        server_data["last_used_id"],
+                    )
+                    return server_data["last_used_id"]
             except:
                 logging.debug("Unable to get MYSQL server ID, retrying in 5 seconds")
                 time.sleep(5)
@@ -238,14 +264,19 @@ class Consul:
                     logging.debug("No replication leader node available")
                     return False
 
-                leader_session = result[1]['Session']
+                leader_session = result[1]["Session"]
 
-                logging.debug("Replication leader is %s, we are %s",
-                            leader_session, self.node_health_session)
+                logging.debug(
+                    "Replication leader is %s, we are %s",
+                    leader_session,
+                    self.node_health_session,
+                )
 
                 return leader_session == self.node_health_session
             except:
-                logging.warning("Unable to determine replication leader from Consul, retrying in 5 seconds")
+                logging.warning(
+                    "Unable to determine replication leader from Consul, retrying in 5 seconds"
+                )
                 time.sleep(5)
 
         return False
@@ -263,16 +294,20 @@ class Consul:
                 if result[1] is None:
                     return None
 
-                json_string = result[1]['Value']
+                json_string = result[1]["Value"]
                 server_data = json.loads(json_string)
 
                 if not "ip_address" in server_data:
-                    logging.error("Invalid JSON returned from replication ledader (missing server_id) %s",
-                                json_string)
+                    logging.error(
+                        "Invalid JSON returned from replication ledader (missing server_id) %s",
+                        json_string,
+                    )
 
-                return server_data['ip_address']
+                return server_data["ip_address"]
             except:
-                logging.warning("Unable to get replication leader IP from Consul, retrying in 5 seconds")
+                logging.warning(
+                    "Unable to get replication leader IP from Consul, retrying in 5 seconds"
+                )
                 time.sleep(5)
 
         return None
@@ -291,13 +326,13 @@ class Consul:
                     logging.debug("Register MySQL instance in Consul")
                     ip_address = Consul.getLocalIp()
 
-                    json_string = json.dumps({
-                        'ip_address': ip_address
-                    })
+                    json_string = json.dumps({"ip_address": ip_address})
 
-                    put_result = self.client.kv.put(Consul.replication_leader_path,
-                                                    json_string,
-                                                    acquire=self.node_health_session)
+                    put_result = self.client.kv.put(
+                        Consul.replication_leader_path,
+                        json_string,
+                        acquire=self.node_health_session,
+                    )
 
                     if put_result:
                         logging.info("We are the new replication leader")
@@ -308,11 +343,12 @@ class Consul:
 
                 return False
             except:
-                logging.warning("Unable to become replication leader due to error communicating with Consul, retrying in 5 seconds")
+                logging.warning(
+                    "Unable to become replication leader due to error communicating with Consul, retrying in 5 seconds"
+                )
                 time.sleep(5)
 
         return False
-
 
     def register_service(self, leader=False, port=3306):
         """
@@ -336,16 +372,22 @@ class Consul:
                 all_services = self.client.agent.services()
 
                 if service_id in all_services:
-                    logging.debug("Unregister old service %s (%s)", service_id, all_services)
+                    logging.debug(
+                        "Unregister old service %s (%s)", service_id, all_services
+                    )
                     self.client.agent.service.deregister(service_id)
 
                 # Register new service
                 logging.info("Register new service_id=%s, tags=%s", service_id, tags)
-                self.client.agent.service.register("mysql", service_id=service_id, port=port, tags=tags)
+                self.client.agent.service.register(
+                    "mysql", service_id=service_id, port=port, tags=tags
+                )
 
                 return True
             except:
-                logging.warning("Unable to register service in Consul, retrying in 5 seconds")
+                logging.warning(
+                    "Unable to register service in Consul, retrying in 5 seconds"
+                )
                 time.sleep(5)
 
         return False
@@ -361,19 +403,27 @@ class Consul:
                 logging.debug("Register MySQL instance in Consul")
                 ip_address = Consul.getLocalIp()
 
-                json_string = json.dumps({
-                    'ip_address': ip_address,
-                    'server_id': '',
-                    'mysql_version': '',
-                    'snapshotting': False,
-                    'restoring': False,
-                })
+                json_string = json.dumps(
+                    {
+                        "ip_address": ip_address,
+                        "server_id": "",
+                        "mysql_version": "",
+                        "snapshotting": False,
+                        "restoring": False,
+                    }
+                )
 
                 path = f"{Consul.instances_path}{ip_address}"
-                logging.debug("Consul: Path %s, value %s (session %s)",
-                            path, json_string, self.node_health_session)
+                logging.debug(
+                    "Consul: Path %s, value %s (session %s)",
+                    path,
+                    json_string,
+                    self.node_health_session,
+                )
 
-                put_result = self.client.kv.put(path, json_string, acquire=self.node_health_session)
+                put_result = self.client.kv.put(
+                    path, json_string, acquire=self.node_health_session
+                )
 
                 if not put_result:
                     logging.error("Unable to create %s", path)
@@ -381,7 +431,9 @@ class Consul:
 
                 return True
             except:
-                logging.warning("Unable to register node in Consul, retrying in 5 seconds")
+                logging.warning(
+                    "Unable to register node in Consul, retrying in 5 seconds"
+                )
                 time.sleep(5)
 
         logging.error("Unable to register node")
@@ -403,22 +455,28 @@ class Consul:
 
                 get_result = self.client.kv.get(f"{Consul.instances_path}{ip_address}")
 
-                if get_result[1] is None or get_result[1]['Value'] is None:
+                if get_result[1] is None or get_result[1]["Value"] is None:
                     logging.error("Node %s not registered in Consul", ip_address)
                     return False
 
-                node_data = json.loads(get_result[1]['Value'])
+                node_data = json.loads(get_result[1]["Value"])
 
-                node_data['server_id'] = self.server_id
-                node_data['mysql_version'] = self.mysql_version
+                node_data["server_id"] = self.server_id
+                node_data["mysql_version"] = self.mysql_version
 
                 json_string = json.dumps(node_data)
 
                 path = f"{Consul.instances_path}{ip_address}"
-                logging.debug("Consul: Path %s, value %s (session %s)",
-                            path, json_string, self.node_health_session)
+                logging.debug(
+                    "Consul: Path %s, value %s (session %s)",
+                    path,
+                    json_string,
+                    self.node_health_session,
+                )
 
-                put_result = self.client.kv.put(path, json_string, acquire=self.node_health_session)
+                put_result = self.client.kv.put(
+                    path, json_string, acquire=self.node_health_session
+                )
 
                 if not put_result:
                     logging.error("Unable to populate node info for %s", path)
@@ -426,7 +484,9 @@ class Consul:
 
                 return True
             except:
-                logging.warning("Unable to populate node info in Consul, retrying in 5 seconds")
+                logging.warning(
+                    "Unable to populate node info in Consul, retrying in 5 seconds"
+                )
                 time.sleep(5)
 
         logging.error("Unable to populate node info")
@@ -450,20 +510,26 @@ class Consul:
                 get_result = self.client.kv.get(f"{Consul.instances_path}{ip_address}")
                 logging.debug("Got result %s", get_result)
 
-                if get_result[1] is None or get_result[1]['Value'] is None:
+                if get_result[1] is None or get_result[1]["Value"] is None:
                     logging.error("Node %s not registered in Consul", ip_address)
                     return False
 
-                node_data = json.loads(get_result[1]['Value'])
-                node_data['restoring'] = restoring
+                node_data = json.loads(get_result[1]["Value"])
+                node_data["restoring"] = restoring
 
                 json_string = json.dumps(node_data)
 
                 path = f"{Consul.instances_path}{ip_address}"
-                logging.debug("Consul: Path %s, value %s (session %s)",
-                            path, json_string, self.node_health_session)
+                logging.debug(
+                    "Consul: Path %s, value %s (session %s)",
+                    path,
+                    json_string,
+                    self.node_health_session,
+                )
 
-                put_result = self.client.kv.put(path, json_string, acquire=self.node_health_session)
+                put_result = self.client.kv.put(
+                    path, json_string, acquire=self.node_health_session
+                )
 
                 if not put_result:
                     logging.error("Unable to mark restoring flag on %s", path)
@@ -471,7 +537,9 @@ class Consul:
 
                 return True
             except:
-                logging.warning("Unable to mark node as restoring in Consul, retrying in 5 seconds")
+                logging.warning(
+                    "Unable to mark node as restoring in Consul, retrying in 5 seconds"
+                )
                 time.sleep(5)
 
         logging.error("Unable to mark node as restoring")
@@ -496,20 +564,26 @@ class Consul:
                 get_result = self.client.kv.get(f"{Consul.instances_path}{ip_address}")
                 logging.debug("Got result %s", get_result)
 
-                if get_result[1] is None or get_result[1]['Value'] is None:
+                if get_result[1] is None or get_result[1]["Value"] is None:
                     logging.error("Node %s not registered in Consul", ip_address)
                     return False
 
-                node_data = json.loads(get_result[1]['Value'])
-                node_data['snapshotting'] = snapshotting
+                node_data = json.loads(get_result[1]["Value"])
+                node_data["snapshotting"] = snapshotting
 
                 json_string = json.dumps(node_data)
 
                 path = f"{Consul.instances_path}{ip_address}"
-                logging.debug("Consul: Path %s, value %s (session %s)",
-                            path, json_string, self.node_health_session)
+                logging.debug(
+                    "Consul: Path %s, value %s (session %s)",
+                    path,
+                    json_string,
+                    self.node_health_session,
+                )
 
-                put_result = self.client.kv.put(path, json_string, acquire=self.node_health_session)
+                put_result = self.client.kv.put(
+                    path, json_string, acquire=self.node_health_session
+                )
 
                 if not put_result:
                     logging.error("Unable to mark snapshotting flag on %s", path)
@@ -517,7 +591,9 @@ class Consul:
 
                 return True
             except:
-                logging.warning("Unable to mark node as snapshotting in Consul, retrying in 5 seconds")
+                logging.warning(
+                    "Unable to mark node as snapshotting in Consul, retrying in 5 seconds"
+                )
                 time.sleep(5)
 
         logging.error("Unable to mark node as snapshotting")
@@ -538,7 +614,7 @@ class Consul:
 
                 if result[1] is not None:
                     for node in result[1]:
-                        node_value = node['Value']
+                        node_value = node["Value"]
                         node_data = json.loads(node_value)
 
                         if not "restoring" in node_data:
@@ -551,7 +627,9 @@ class Consul:
 
                 return False
             except:
-                logging.warning("Unable to get registered nodes from Consul, retrying in 5 seconds")
+                logging.warning(
+                    "Unable to get registered nodes from Consul, retrying in 5 seconds"
+                )
                 time.sleep(5)
 
         return False
@@ -571,7 +649,7 @@ class Consul:
 
                 if result[1] is not None:
                     for node in result[1]:
-                        node_value = node['Value']
+                        node_value = node["Value"]
                         node_data = json.loads(node_value)
 
                         if not "snapshotting" in node_data:
@@ -584,7 +662,9 @@ class Consul:
 
                 return False
             except:
-                logging.warning("Unable to get registered nodes from Consul, retrying in 5 seconds")
+                logging.warning(
+                    "Unable to get registered nodes from Consul, retrying in 5 seconds"
+                )
                 time.sleep(5)
 
         return False
@@ -602,7 +682,10 @@ class Consul:
                 self.client.session.renew(self.node_health_session)
                 return True
             except:
-                logging.warning("Unable to refresh session %s, retrying in 5 seconds", self.node_health_session)
+                logging.warning(
+                    "Unable to refresh session %s, retrying in 5 seconds",
+                    self.node_health_session,
+                )
                 time.sleep(5)
                 continue
 
@@ -615,7 +698,9 @@ class Consul:
             self.register_node()
             self.populate_node_info(self.mysql_version, self.server_id)
         except:
-            logging.error("Unable to recreate the node health session, something is wrong with Consul")
+            logging.error(
+                "Unable to recreate the node health session, something is wrong with Consul"
+            )
 
         return False
 
@@ -633,7 +718,10 @@ class Consul:
                 self.client.session.destroy(self.node_health_session)
                 break
             except:
-                logging.warning("Unable to destroy session %s, retrying in 5 seconds", self.node_health_session)
+                logging.warning(
+                    "Unable to destroy session %s, retrying in 5 seconds",
+                    self.node_health_session,
+                )
                 time.sleep(5)
                 continue
 
@@ -645,7 +733,9 @@ class Consul:
         Start the local Consul agent.
         """
         if Consul.getLocalIp() is None:
-            logging.error("Unable to determine local IP address, cannot start Consul agent")
+            logging.error(
+                "Unable to determine local IP address, cannot start Consul agent"
+            )
             sys.exit(1)
 
         logging.info("Starting Consul Agent")
@@ -663,13 +753,17 @@ class Consul:
         consul_args.append("-server")
 
         consul_args.append("-retry-join")
-        consul_args.append(f'tasks.{Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_SERVICE", "mysql")}')
+        consul_args.append(
+            f"tasks.{Utils.get_envvar_or_secret('CONSUL_BOOTSTRAP_SERVICE', 'mysql')}"
+        )
 
         consul_args.append("-bootstrap-expect")
         consul_args.append(Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_EXPECT", "3"))
 
-        if (Utils.get_envvar_or_secret("CONSUL_ENABLE_UI", "false").lower() == "true" or
-            Utils.get_envvar_or_secret("CONSUL_ENABLE_UI", "false") == "1"):
+        if (
+            Utils.get_envvar_or_secret("CONSUL_ENABLE_UI", "false").lower() == "true"
+            or Utils.get_envvar_or_secret("CONSUL_ENABLE_UI", "false") == "1"
+        ):
             consul_args.append("-ui")
 
         logging.info("Consul args: %s", consul_args)
@@ -687,16 +781,31 @@ class Consul:
         """
         Get the local IP, based on the service being bootstrapped
         """
-        ip_addresses = socket.gethostbyname_ex(
-            f'tasks.{Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_SERVICE", "mysql")}')[2]
+        for _ in range(300):
+            try:
+                logging.debug(
+                    f"Determining local IP address by querying Docker DNS - tasks.{Utils.get_envvar_or_secret('CONSUL_BOOTSTRAP_SERVICE', 'mysql')}"
+                )
+                ip_addresses = socket.gethostbyname_ex(
+                    f"tasks.{Utils.get_envvar_or_secret('CONSUL_BOOTSTRAP_SERVICE', 'mysql')}"
+                )[2]
 
-        for interface in netifaces.interfaces():
-            if interface == 'lo':
-                continue
+                for interface in netifaces.interfaces():
+                    if interface == "lo":
+                        continue
 
-            for addressInfo in netifaces.ifaddresses(interface)[netifaces.AF_INET]:
-                if addressInfo['addr'] in ip_addresses:
-                    logging.debug("Found local IP %s on interface %s", addressInfo['addr'], interface)
-                    return addressInfo['addr']
+                    for addressInfo in netifaces.ifaddresses(interface)[
+                        netifaces.AF_INET
+                    ]:
+                        if addressInfo["addr"] in ip_addresses:
+                            logging.debug(
+                                "Found local IP %s on interface %s",
+                                addressInfo["addr"],
+                                interface,
+                            )
+                            return addressInfo["addr"]
+            except:
+                logging.warning("Unable to determine local IP address, retrying")
+                time.sleep(1)
 
         return None

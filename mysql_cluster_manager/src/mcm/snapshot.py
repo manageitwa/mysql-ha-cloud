@@ -14,6 +14,7 @@ from mcm.utils import Utils
 class Snapshot:
     pendingPath = "/snapshots/pending"
     currentPath = "/snapshots/current"
+    logger = logging.getLogger(__name__)
 
     @staticmethod
     def exists():
@@ -62,7 +63,7 @@ class Snapshot:
             if not Snapshot.isPending() and Snapshot.exists():
                 return True
 
-            logging.debug(
+            Snapshot.logger.debug(
                 "Still waiting for snapshot (%s, %s)",
                 Snapshot.isPending(),
                 Snapshot.exists(),
@@ -88,7 +89,7 @@ class Snapshot:
             ):
                 return True
 
-            logging.debug(
+            Snapshot.logger.debug(
                 "Still waiting for snapshot and restores (%s, %s, %s)",
                 Snapshot.isPending(),
                 Snapshot.exists(),
@@ -108,19 +109,21 @@ class Snapshot:
         if not force and (
             Snapshot.isPending() or Consul.get_instance().are_nodes_restoring()
         ):
-            logging.info(
+            Snapshot.logger.info(
                 "Pending snapshot or restore, wait for it to complete before creating a new snapshot"
             )
 
             finished = Snapshot.waitForSnapshotAndRestores()
 
             if not finished:
-                logging.error("Snapshot creation / restoration did not finish in time")
+                Snapshot.logger.error(
+                    "Snapshot creation / restoration did not finish in time"
+                )
                 return False
 
-        logging.info("Snapshotting MySQL into dir %s", Snapshot.pendingPath)
+        Snapshot.logger.info("Snapshotting MySQL into dir %s", Snapshot.pendingPath)
         if os.path.exists(Snapshot.pendingPath):
-            logging.warning(
+            Snapshot.logger.warning(
                 "Snapshot path %s already exists, removing", Snapshot.pendingPath
             )
             rmtree(Snapshot.pendingPath)
@@ -158,7 +161,7 @@ class Snapshot:
             subprocess.run(xtrabackup_prepare, check=True)
 
             # Remove old snapshot
-            logging.info("Removing old snapshot %s", Snapshot.currentPath)
+            Snapshot.logger.info("Removing old snapshot %s", Snapshot.currentPath)
             if os.path.exists(Snapshot.currentPath):
                 rmtree(Snapshot.currentPath)
 
@@ -167,10 +170,10 @@ class Snapshot:
             if not force:
                 Consul.get_instance().node_set_snapshotting_flag(snapshotting=False)
 
-            logging.info("Snapshot was successfully created")
+            Snapshot.logger.info("Snapshot was successfully created")
             return True
         except:
-            logging.exception("Failed to create snapshot")
+            Snapshot.logger.exception("Failed to create snapshot")
             Snapshot.resetPending()
             if not force:
                 Consul.get_instance().node_set_snapshotting_flag(snapshotting=False)
@@ -181,16 +184,18 @@ class Snapshot:
         """Restore MySQL server from a snapshot"""
 
         if not Snapshot.exists():
-            logging.error("No snapshot to restore")
+            Snapshot.logger.error("No snapshot to restore")
             return False
 
         if Snapshot.isPending():
-            logging.info("Pending snapshot, wait for it to complete before restoring")
+            Snapshot.logger.info(
+                "Pending snapshot, wait for it to complete before restoring"
+            )
 
             finished = Snapshot.waitForSnapshot()
 
             if not finished:
-                logging.error("Snapshot creation did not finish in time")
+                Snapshot.logger.error("Snapshot creation did not finish in time")
                 return False
 
         oldMysqlDir = None
@@ -198,10 +203,10 @@ class Snapshot:
         try:
             Consul.get_instance().node_set_restoring_flag(restoring=True)
 
-            logging.info("Restoring snapshot from %s", Snapshot.currentPath)
+            Snapshot.logger.info("Restoring snapshot from %s", Snapshot.currentPath)
 
             if os.path.isfile(f"{Mysql.mysql_datadir}/ib_logfile0"):
-                logging.info("MySQL is already initialized, cleaning up first")
+                Snapshot.logger.info("MySQL is already initialized, cleaning up first")
                 currentTime = time.time()
                 oldMysqlDir = f"{Mysql.mysql_datadir}_restore_{currentTime}"
 
@@ -212,10 +217,10 @@ class Snapshot:
                 for entry in os.listdir(Mysql.mysql_datadir):
                     sourcePath = f"{Mysql.mysql_datadir}/{entry}"
                     destPath = f"{oldMysqlDir}/{entry}"
-                    logging.debug("Moving %s to %s", sourcePath, destPath)
+                    Snapshot.logger.debug("Moving %s to %s", sourcePath, destPath)
                     move(sourcePath, destPath)
 
-                logging.info("Old MySQL data moved to: %s", oldMysqlDir)
+                Snapshot.logger.info("Old MySQL data moved to: %s", oldMysqlDir)
 
             # Restore backup
             xtrabackup = [
@@ -231,16 +236,16 @@ class Snapshot:
 
             # Delete backup MySQL directory
             if oldMysqlDir:
-                logging.info("Removing old MySQL data from %s", oldMysqlDir)
+                Snapshot.logger.info("Removing old MySQL data from %s", oldMysqlDir)
                 rmtree(oldMysqlDir)
 
             Consul.get_instance().node_set_restoring_flag(restoring=False)
             return True
         except:
-            logging.exception("Failed to restore snapshot")
+            Snapshot.logger.exception("Failed to restore snapshot")
 
             if oldMysqlDir:
-                logging.info("Restoring old MySQL data from %s", oldMysqlDir)
+                Snapshot.logger.info("Restoring old MySQL data from %s", oldMysqlDir)
 
                 for entry in os.listdir(Mysql.mysql_datadir):
                     sourcePath = f"{Mysql.mysql_datadir}/{entry}"
@@ -258,9 +263,11 @@ class Snapshot:
     def resetPending():
         """Reset the pending snapshot"""
 
-        logging.info("Removing pending snapshot %s", Snapshot.pendingPath)
+        Snapshot.logger.info("Removing pending snapshot %s", Snapshot.pendingPath)
 
         if os.path.exists(Snapshot.pendingPath):
             rmtree(Snapshot.pendingPath)
         else:
-            logging.info("No pending snapshot to remove %s", Snapshot.pendingPath)
+            Snapshot.logger.info(
+                "No pending snapshot to remove %s", Snapshot.pendingPath
+            )

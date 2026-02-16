@@ -88,7 +88,7 @@ class Mysql:
             f"IDENTIFIED WITH caching_sha2_password BY '{replication_password}'"
         )
         Mysql.execute_statement_or_exit(
-            f"GRANT REPLICATION SLAVE ON *.* TO '{replication_user}'@'%'"
+            f"GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '{replication_user}'@'%'"
         )
 
         # Change permissions for the root user

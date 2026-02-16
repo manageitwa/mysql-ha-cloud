@@ -1,4 +1,4 @@
-ARG MYSQL_VERSION=8.4.7
+ARG MYSQL_VERSION=8.4.8
 FROM mysql:${MYSQL_VERSION}-oracle
 
 ENV MYSQL_VERSION=${MYSQL_VERSION}
@@ -18,18 +18,18 @@ RUN \
     unzip \
     wget && \
     # Install Percona XtraBackup
-    wget https://downloads.percona.com/downloads/Percona-XtraBackup-8.4/Percona-XtraBackup-8.4.0-4/binary/redhat/9/x86_64/percona-xtrabackup-84-8.4.0-4.1.el9.x86_64.rpm -O /tmp/xtrabackup.rpm && \
+    wget https://downloads.percona.com/downloads/Percona-XtraBackup-8.4/Percona-XtraBackup-8.4.0-5/binary/redhat/9/x86_64/percona-xtrabackup-84-8.4.0-5.1.el9.x86_64.rpm -O /tmp/xtrabackup.rpm && \
     rpm -i /tmp/xtrabackup.rpm && \
     rm /tmp/xtrabackup.rpm && \
     # Install Consul CLI
-    wget https://releases.hashicorp.com/consul/1.22.1/consul_1.22.1_linux_amd64.zip -O /tmp/consul.zip && \
-    echo "91222c7ec141f1c2c92f6b732eeb0251220337e4c07c768cbc6ae633fef69733 /tmp/consul.zip" | sha256sum -c && \
+    wget https://releases.hashicorp.com/consul/1.22.3/consul_1.22.3_linux_amd64.zip -O /tmp/consul.zip && \
+    echo "0942ef6ed43522adfb4cddbefea2f0e64306318afb8aeab3727563f0caef04be /tmp/consul.zip" | sha256sum -c && \
     unzip /tmp/consul.zip -d /usr/local/bin && \
     rm /usr/local/bin/LICENSE.txt && \
     rm /tmp/consul.zip && \
     # Install ProxySQL
-    wget https://github.com/sysown/proxysql/releases/download/v3.0.3/proxysql-3.0.3-1-centos9.x86_64.rpm -O /tmp/proxysql.rpm && \
-    echo "6d02e80e9d29e4141e48b5ef733ed762d1957ec0b01dc57e0116bd945a1fe83d /tmp/proxysql.rpm" | sha256sum -c && \
+    wget https://github.com/sysown/proxysql/releases/download/v3.0.5/proxysql-3.0.5-1-centos9.x86_64.rpm -O /tmp/proxysql.rpm && \
+    echo "40ec35c6863e2a73aa745ce32224c6e189f7e14ecc9e346ceddfe00ea03bc4b1 /tmp/proxysql.rpm" | sha256sum -c && \
     rpm -i /tmp/proxysql.rpm && \
     rm /tmp/proxysql.rpm && \
     # Create directories for Cluster Manager and snapshot

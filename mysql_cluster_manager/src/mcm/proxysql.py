@@ -30,7 +30,7 @@ class Proxysql:
         # Change admin password if needed
         if Utils.get_envvar_or_secret("PROXYSQL_ADMIN_PASSWORD", "admin") != "admin":
             Mysql.execute_statement_or_exit(
-                sql=f"UPDATE global_variables SET variable_valu='admin:{Utils.get_envvar_or_secret('PROXYSQL_ADMIN_PASSWORD', 'admin')}' "
+                sql=f"UPDATE global_variables SET variable_value='admin:{Utils.get_envvar_or_secret('PROXYSQL_ADMIN_PASSWORD', 'admin')}' "
                 "WHERE variable_name='admin-admin_credentials'",
                 username="admin",
                 password="admin",

@@ -24,10 +24,17 @@ services:
       MYSQL_REPLICATION_USER: replication_user
       MYSQL_REPLICATION_PASSWORD: replication_pass
 
+      MYSQL_MONITOR_USER: monitor_user
+      MYSQL_MONITOR_PASSWORD: monitor_pass
+
       MYSQL_TLS_CA: /cert/ca.pem
       MYSQL_TLS_CERT: /cert/cert.pem
       MYSQL_TLS_KEY: /cert/cert.key
       MYSQL_TLS_REQUIRED: "false"
+
+      PROXYSQL_REMOTE_ADMIN_USERNAME: remoteadmin
+      PROXYSQL_REMOTE_ADMIN_PASSWORD: remoteadmin_pass
+      PROXYSQL_MAX_REPLICATION_LAG: 15
     networks:
       mysql-ha:
     volumes:
@@ -61,4 +68,5 @@ services:
         order: start-first
     ports:
       - 3307:6033
+      - 6032:6032
       - 8500:8500

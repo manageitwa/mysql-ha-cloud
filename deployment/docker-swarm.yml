@@ -23,6 +23,9 @@ services:
       MYSQL_REPLICATION_USER: replication_user
       MYSQL_REPLICATION_PASSWORD: replication_pass
 
+      MYSQL_MONITOR_USER: monitor_user
+      MYSQL_MONITOR_PASSWORD: monitor_pass
+
       # If using TLS, uncomment these and mount the certs below
       # MYSQL_TLS_CA: /cert/ca.pem
       # MYSQL_TLS_CERT: /cert/cert.pem

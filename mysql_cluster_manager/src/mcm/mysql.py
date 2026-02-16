@@ -91,6 +91,18 @@ class Mysql:
             f"GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '{replication_user}'@'%'"
         )
 
+        # Create monitor user
+        logging.debug("Creating monitor user")
+        monitor_user = Utils.get_envvar_or_secret("MYSQL_MONITOR_USER")
+        monitor_password = Utils.get_envvar_or_secret("MYSQL_MONITOR_PASSWORD")
+        Mysql.execute_statement_or_exit(
+            f"CREATE USER '{monitor_user}'@'%' "
+            f"IDENTIFIED WITH caching_sha2_password BY '{monitor_password}'"
+        )
+        Mysql.execute_statement_or_exit(
+            f"GRANT PROCESS, REPLICATION CLIENT ON *.* TO '{monitor_user}'@'%'"
+        )
+
         # Change permissions for the root user
         logging.debug("Set permissions for the root user")
         root_password = Utils.get_envvar_or_secret("MYSQL_ROOT_PASSWORD")
@@ -119,6 +131,13 @@ class Mysql:
                 username="root",
                 password=root_password,
             )
+
+        # Flush privileges
+        Mysql.execute_statement_or_exit(
+            sql="FLUSH PRIVILEGES",
+            username="root",
+            password=root_password,
+        )
 
         # Shutdown MySQL server
         logging.debug("Inital MySQL setup done, shutdown server..")

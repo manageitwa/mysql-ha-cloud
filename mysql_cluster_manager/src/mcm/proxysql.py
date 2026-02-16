@@ -29,21 +29,30 @@ class Proxysql:
 
         # Change admin password if needed
         if Utils.get_envvar_or_secret("PROXYSQL_ADMIN_PASSWORD", "admin") != "admin":
-            Mysql.execute_statement_or_exit(
-                sql=f"UPDATE global_variables SET variable_value='admin:{Utils.get_envvar_or_secret('PROXYSQL_ADMIN_PASSWORD', 'admin')}' "
-                "WHERE variable_name='admin-admin_credentials'",
-                username="admin",
-                password="admin",
-                database="",
-                port=6032,
-            )
-            Mysql.execute_statement_or_exit(
-                sql="LOAD ADMIN VARIABLES TO RUNTIME",
-                username="admin",
-                password="admin",
-                database="",
-                port=6032,
-            )
+            admin_credentials = f"admin:{Utils.get_envvar_or_secret('PROXYSQL_ADMIN_PASSWORD', 'admin')}"
+        else:
+            admin_credentials = "admin:admin"
+
+        if Utils.get_envvar_or_secret(
+            "PROXYSQL_REMOTE_ADMIN_USERNAME"
+        ) and Utils.get_envvar_or_secret("PROXYSQL_REMOTE_ADMIN_PASSWORD"):
+            admin_credentials = f"{admin_credentials};{Utils.get_envvar_or_secret('PROXYSQL_REMOTE_ADMIN_USERNAME')}:{Utils.get_envvar_or_secret('PROXYSQL_REMOTE_ADMIN_PASSWORD')}"
+
+        Mysql.execute_statement_or_exit(
+            sql=f"UPDATE global_variables SET variable_value='{admin_credentials}' "
+            "WHERE variable_name='admin-admin_credentials'",
+            username="admin",
+            password="admin",
+            database="",
+            port=6032,
+        )
+        Mysql.execute_statement_or_exit(
+            sql="LOAD ADMIN VARIABLES TO RUNTIME",
+            username="admin",
+            password="admin",
+            database="",
+            port=6032,
+        )
 
         # Set up MySQL variables
         Proxysql.perform_sql_query(
@@ -56,15 +65,15 @@ class Proxysql:
         )
 
         # Setup Monitoring User
-        replication_user = Utils.get_envvar_or_secret("MYSQL_REPLICATION_USER")
-        replication_password = Utils.get_envvar_or_secret("MYSQL_REPLICATION_PASSWORD")
+        monitor_user = Utils.get_envvar_or_secret("MYSQL_MONITOR_USER")
+        monitor_password = Utils.get_envvar_or_secret("MYSQL_MONITOR_PASSWORD")
 
         Proxysql.perform_sql_query(
-            f"UPDATE global_variables SET variable_value='{replication_user}' "
+            f"UPDATE global_variables SET variable_value='{monitor_user}' "
             "WHERE variable_name='mysql-monitor_username'"
         )
         Proxysql.perform_sql_query(
-            f"UPDATE global_variables SET variable_value='{replication_password}' "
+            f"UPDATE global_variables SET variable_value='{monitor_password}' "
             "WHERE variable_name='mysql-monitor_password'"
         )
 
@@ -186,8 +195,8 @@ class Proxysql:
                 use_ssl = 0
 
             Proxysql.perform_sql_query(
-                "INSERT INTO mysql_servers(hostgroup_id, hostname, port, use_ssl) "
-                f"VALUES (1, '{mysql_server}', 3306, {use_ssl})"
+                "INSERT INTO mysql_servers(hostgroup_id, hostname, port, use_ssl, max_replication_lag) "
+                f"VALUES (1, '{mysql_server}', 3306, {use_ssl}, {Utils.get_envvar('PROXYSQL_MAX_REPLICATION_LAG', '0')})"
             )
 
         Proxysql.perform_sql_query("LOAD MYSQL SERVERS TO RUNTIME")

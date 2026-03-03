@@ -254,6 +254,12 @@ class Mysql:
         AND the replica is fully caught up with the leader.
         """
 
+        from mcm.snapshot import Snapshot
+
+        if Snapshot.is_snapshotting:
+            logging.debug("Skipping replication health check during snapshot")
+            return True
+
         slave_status = Mysql.execute_query_as_root("SHOW REPLICA STATUS")
 
         if len(slave_status) != 1:

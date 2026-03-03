@@ -202,8 +202,8 @@ class Actions:
                         replication_lag_count = 0
 
                 # Attempt to become leader if the replica is healthy - this will only occur if the original leader
-                # has gone offline.
-                if not replication_leader and replication_healthy:
+                # has gone offline. Do not promote if currently snapshotting.
+                if not replication_leader and replication_healthy and not Snapshot.is_snapshotting:
                     promotion = Consul.get_instance().try_to_become_replication_leader()
 
                     # Are we the new leader?
@@ -212,8 +212,8 @@ class Actions:
                         Consul.get_instance().register_service(True)
                         replication_leader = True
 
-                # Check for correct replication leader
-                if not replication_leader:
+                # Check for correct replication leader (skip during snapshot)
+                if not replication_leader and not Snapshot.is_snapshotting:
                     real_leader = Consul.get_instance().get_replication_leader_ip()
                     configured_leader = Mysql.get_replication_leader_ip()
 

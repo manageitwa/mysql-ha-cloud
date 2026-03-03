@@ -14,6 +14,7 @@ from mcm.utils import Utils
 class Snapshot:
     pendingPath = "/snapshots/pending"
     currentPath = "/snapshots/current"
+    is_snapshotting = False
 
     @staticmethod
     def exists():
@@ -132,6 +133,8 @@ class Snapshot:
             if not force:
                 Consul.get_instance().node_set_snapshotting_flag(snapshotting=True)
 
+            Snapshot.is_snapshotting = True
+
             # Create mysql backup
             backupUser = Utils.get_envvar_or_secret("MYSQL_BACKUP_USER")
             backupPass = Utils.get_envvar_or_secret("MYSQL_BACKUP_PASSWORD")
@@ -164,6 +167,8 @@ class Snapshot:
 
             move(Snapshot.pendingPath, Snapshot.currentPath)
 
+            Snapshot.is_snapshotting = False
+
             if not force:
                 Consul.get_instance().node_set_snapshotting_flag(snapshotting=False)
 
@@ -171,6 +176,7 @@ class Snapshot:
             return True
         except:
             logging.exception("Failed to create snapshot")
+            Snapshot.is_snapshotting = False
             Snapshot.resetPending()
             if not force:
                 Consul.get_instance().node_set_snapshotting_flag(snapshotting=False)

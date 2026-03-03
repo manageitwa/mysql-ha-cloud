@@ -321,13 +321,17 @@ class Mysql:
             Mysql._replication_unhealthy_flag = False
 
         seconds_behind = status.get("Seconds_Behind_Source")
-        lag_threshold = int(Utils.get_envvar_or_secret("MYSQL_REPLICATION_LAG_THRESHOLD", "10"))
+        lag_threshold = int(
+            Utils.get_envvar_or_secret("MYSQL_REPLICATION_LAG_THRESHOLD", "5")
+        )
         if lag_threshold > 0:
             if seconds_behind is not None and seconds_behind > lag_threshold:
                 logging.warning("Replica is %s seconds behind source", seconds_behind)
+                Consul.get_instance().node_set_replication_unhealthy_flag(True)
                 Mysql._replication_lagging = True
             else:
                 logging.debug("Replica is %s seconds behind source", seconds_behind)
+                Consul.get_instance().node_set_replication_unhealthy_flag(False)
                 Mysql._replication_lagging = False
 
         io_state = status.get("Replica_IO_State", "")

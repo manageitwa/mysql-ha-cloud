@@ -174,6 +174,10 @@ class Proxysql:
         logging.info("Removing all old backend MySQL Server")
         Proxysql.perform_sql_query("DELETE FROM mysql_servers")
 
+        max_lag = int(
+            Utils.get_envvar_or_secret("MYSQL_REPLICATION_LAG_THRESHOLD", "5")
+        )
+
         for mysql_server in mysql_servers:
             logging.info("Adding %s as backend MySQL Server", mysql_server)
             if (
@@ -186,8 +190,8 @@ class Proxysql:
                 use_ssl = 0
 
             Proxysql.perform_sql_query(
-                "INSERT INTO mysql_servers(hostgroup_id, hostname, port, use_ssl) "
-                f"VALUES (1, '{mysql_server}', 3306, {use_ssl})"
+                "INSERT INTO mysql_servers(hostgroup_id, hostname, port, use_ssl, max_replication_lag) "
+                f"VALUES (1, '{mysql_server}', 3306, {use_ssl}, {max_lag})"
             )
 
         Proxysql.perform_sql_query("LOAD MYSQL SERVERS TO RUNTIME")

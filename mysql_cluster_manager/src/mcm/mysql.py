@@ -547,3 +547,48 @@ class Mysql:
         if not result:
             logging.error("Unable to restore MySQL backup")
             sys.exit(1)
+
+    @staticmethod
+    def check_replication_user_privileges():
+        """
+        Ensures that replication user privileges are still set correctly. This prevents the foot-gun
+        of someone trying to manipulate this user.
+        """
+
+        # Ensure replication user is still available and set up correctly
+        replication_user = Utils.get_envvar_or_secret("MYSQL_REPLICATION_USER")
+        replication_password = Utils.get_envvar_or_secret("MYSQL_REPLICATION_PASSWORD")
+
+        grants = Mysql.execute_query_as_root(
+            f"SHOW GRANTS FOR '{replication_user}'@'%'"
+        )[0].get(f"Grants for {replication_user}@%", "")
+        logging.debug(grants)
+
+        if grants == "":
+            logging.debug("Re-creating replication user")
+
+            Mysql.execute_query_as_root(
+                f"CREATE USER '{replication_user}'@'%' "
+                f"IDENTIFIED WITH caching_sha2_password BY '{replication_password}'"
+            )
+            Mysql.execute_query_as_root(
+                f"GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '{replication_user}'@'%'"
+            )
+            Mysql.execute_query_as_root("FLUSH PRIVILEGES")
+        elif (
+            grants
+            != f"GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO {replication_user}@%"
+        ):
+            logging.debug(
+                "Deleting and re-creating replication user due to incorrect permissions"
+            )
+
+            Mysql.execute_query_as_root(f"DROP USER '{replication_user}'@'%'")
+            Mysql.execute_query_as_root(
+                f"CREATE USER '{replication_user}'@'%' "
+                f"IDENTIFIED WITH caching_sha2_password BY '{replication_password}'"
+            )
+            Mysql.execute_query_as_root(
+                f"GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '{replication_user}'@'%'"
+            )
+            Mysql.execute_query_as_root("FLUSH PRIVILEGES")

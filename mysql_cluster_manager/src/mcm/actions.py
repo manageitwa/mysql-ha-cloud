@@ -87,6 +87,9 @@ class Actions:
         # Start MySQL
         mysql_process = Mysql.server_start()
 
+        # Check replication user
+        Mysql.check_replication_user_privileges()
+
         # Configure ProxySQL
         Proxysql.inital_setup()
 

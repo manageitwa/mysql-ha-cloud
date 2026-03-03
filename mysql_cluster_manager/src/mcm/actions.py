@@ -136,8 +136,19 @@ class Actions:
         # to an extra thread. The loop needs to refresh the
         # Consul sessions every few seconds.
         while True:
-            Actions.consul_process.poll()
-            Actions.mysql_process.poll()
+            if Actions.consul_process.poll() is not None:
+                logging.error(
+                    "Consul process has exited with code %s, exiting",
+                    Actions.consul_process.returncode,
+                )
+                sys.exit(1)
+
+            if Actions.mysql_process.poll() is not None:
+                logging.error(
+                    "MySQL process has exited with code %s, exiting",
+                    Actions.mysql_process.returncode,
+                )
+                sys.exit(1)
 
             # Try to replace a failed replication leader
             if Utils.is_refresh_needed(

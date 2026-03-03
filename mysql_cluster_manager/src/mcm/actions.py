@@ -129,6 +129,8 @@ class Actions:
         last_replication_leader_check = None
         replication_failure_count = 0
         max_replication_failures = 12
+        replication_lag_count = 0
+        max_replication_lag_checks = 36
 
         proxysql = Proxysql()
 
@@ -166,6 +168,7 @@ class Actions:
                 # Allow an unhealthy replica 60 seconds to restart before killing it off
                 if replication_leader:
                     replication_failure_count = 0
+                    replication_lag_count = 0
                 else:
                     replication_healthy = Mysql.is_replication_healthy()
 
@@ -181,6 +184,19 @@ class Actions:
                                 replication_failure_count,
                             )
                             sys.exit(1)
+
+                    if Mysql._replication_lagging:
+                        replication_lag_count += 1
+
+                        if replication_lag_count >= max_replication_lag_checks:
+                            logging.error(
+                                "Replica has been lagging for %d consecutive checks, "
+                                "exiting to allow container restart",
+                                replication_lag_count,
+                            )
+                            sys.exit(1)
+                    else:
+                        replication_lag_count = 0
 
                 # Attempt to become leader if the replica is healthy - this will only occur if the original leader
                 # has gone offline.

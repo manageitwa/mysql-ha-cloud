@@ -24,6 +24,7 @@ class Mysql:
     mysqld_binary = "/usr/sbin/mysqld"
     mysql_datadir = "/var/lib/mysql"
     _replication_unhealthy_flag = False
+    _replication_lagging = False
 
     @staticmethod
     def init_database_if_needed():
@@ -318,6 +319,16 @@ class Mysql:
         if Mysql._replication_unhealthy_flag:
             Consul.get_instance().node_set_replication_unhealthy_flag(False)
             Mysql._replication_unhealthy_flag = False
+
+        seconds_behind = status.get("Seconds_Behind_Source")
+        lag_threshold = int(Utils.get_envvar_or_secret("MYSQL_REPLICATION_LAG_THRESHOLD", "10"))
+        if lag_threshold > 0:
+            if seconds_behind is not None and seconds_behind > lag_threshold:
+                logging.warning("Replica is %s seconds behind source", seconds_behind)
+                Mysql._replication_lagging = True
+            else:
+                logging.debug("Replica is %s seconds behind source", seconds_behind)
+                Mysql._replication_lagging = False
 
         io_state = status.get("Replica_IO_State", "")
         logging.debug("Follower IO state is '%s'", io_state)

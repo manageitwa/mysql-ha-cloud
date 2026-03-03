@@ -127,7 +127,8 @@ class Actions:
         last_backup_check = None
         last_session_refresh = None
         last_replication_leader_check = None
-        able_to_become_leader = False
+        replication_failure_count = 0
+        max_replication_failures = 12
 
         proxysql = Proxysql()
 
@@ -148,20 +149,31 @@ class Actions:
                 mysql_nodes = Consul.get_instance().get_all_registered_nodes()
                 proxysql.update_mysql_server_if_needed(mysql_nodes)
 
-                # Are the replication data completely processed
-                # (i.e., the data from the leader is stored locally and we
-                # can become the new leader?)
-                if not able_to_become_leader:
-                    if Mysql.is_repliation_data_processed():
-                        logging.info(
-                            "All replication data are read, node can become replication leader"
-                        )
-                        able_to_become_leader = True
-
                 replication_leader = Consul.get_instance().is_replication_leader()
+                replication_healthy = False
 
-                # Try to become new leader
-                if not replication_leader and able_to_become_leader:
+                # Allow an unhealthy replica 60 seconds to restart before killing it off
+                if replication_leader:
+                    replication_failure_count = 0
+                else:
+                    replication_healthy = Mysql.is_replication_healthy()
+
+                    if replication_healthy:
+                        replication_failure_count = 0
+                    else:
+                        replication_failure_count += 1
+
+                        if replication_failure_count >= max_replication_failures:
+                            logging.error(
+                                "Replication has failed %d consecutive checks, "
+                                "exiting to allow container restart",
+                                replication_failure_count,
+                            )
+                            sys.exit(1)
+
+                # Attempt to become leader if the replica is healthy - this will only occur if the original leader
+                # has gone offline.
+                if not replication_leader and replication_healthy:
                     promotion = Consul.get_instance().try_to_become_replication_leader()
 
                     # Are we the new leader?

@@ -23,6 +23,7 @@ class Mysql:
     mysql_server_binary = "/usr/sbin/mysqld"
     mysqld_binary = "/usr/sbin/mysqld"
     mysql_datadir = "/var/lib/mysql"
+    _replication_unhealthy_flag = False
 
     @staticmethod
     def init_database_if_needed():
@@ -242,9 +243,14 @@ class Mysql:
         return slave_status[0]["Source_Host"]
 
     @staticmethod
-    def is_repliation_data_processed():
+    def is_replication_healthy():
         """
-        Is the repliation log from the master completely processed
+        Check that replication is running and all data from the leader
+        has been applied locally. If a replication thread has stopped,
+        attempt an automatic restart.
+
+        Returns True only when both IO and SQL threads are running
+        AND the replica is fully caught up with the leader.
         """
 
         slave_status = Mysql.execute_query_as_root("SHOW REPLICA STATUS")
@@ -252,27 +258,76 @@ class Mysql:
         if len(slave_status) != 1:
             return False
 
-        if not "Replica_IO_State" in slave_status[0]:
-            logging.error("Invalid output, Replica_IO_State not found %s", slave_status)
+        status = slave_status[0]
+
+        # Check that the replication threads are running
+        io_running = status.get("Replica_IO_Running", "No")
+        sql_running = status.get("Replica_SQL_Running", "No")
+
+        if io_running != "Yes" or sql_running != "Yes":
+            io_error = status.get("Last_IO_Error", "")
+            sql_error = status.get("Last_SQL_Error", "")
+
+            logging.warning(
+                "Replication is not healthy (IO_Running=%s, SQL_Running=%s, "
+                "IO_Error='%s', SQL_Error='%s'), attempting restart",
+                io_running,
+                sql_running,
+                io_error,
+                sql_error,
+            )
+
+            replication_user = Utils.get_envvar_or_secret("MYSQL_REPLICATION_USER")
+            replication_password = Utils.get_envvar_or_secret(
+                "MYSQL_REPLICATION_PASSWORD"
+            )
+
+            Mysql.execute_query_as_root("STOP REPLICA", discard_result=True)
+            Mysql.execute_query_as_root(
+                f"START REPLICA USER = '{replication_user}' "
+                f"PASSWORD = '{replication_password}'",
+                discard_result=True,
+            )
+
+            # Allow threads time to start before verifying
+            time.sleep(1)
+
+            verify_status = Mysql.execute_query_as_root("SHOW REPLICA STATUS")
+            if len(verify_status) == 1:
+                new_io = verify_status[0].get("Replica_IO_Running", "No")
+                new_sql = verify_status[0].get("Replica_SQL_Running", "No")
+
+                if new_io == "No" or new_sql == "No":
+                    logging.error(
+                        "Replication restart failed (IO_Running=%s, SQL_Running=%s, "
+                        "IO_Error='%s', SQL_Error='%s')",
+                        new_io,
+                        new_sql,
+                        verify_status[0].get("Last_IO_Error", ""),
+                        verify_status[0].get("Last_SQL_Error", ""),
+                    )
+                else:
+                    logging.info("Replication restart succeeded")
+
+            if not Mysql._replication_unhealthy_flag:
+                Consul.get_instance().node_set_replication_unhealthy_flag(True)
+                Mysql._replication_unhealthy_flag = True
             return False
 
-        # Check that leader is connected and we're waiting for events, or is disconnected
-        io_state = slave_status[0]["Replica_IO_State"]
+        # Both threads are running — clear unhealthy flag and check if fully caught up
+        if Mysql._replication_unhealthy_flag:
+            Consul.get_instance().node_set_replication_unhealthy_flag(False)
+            Mysql._replication_unhealthy_flag = False
+
+        io_state = status.get("Replica_IO_State", "")
         logging.debug("Follower IO state is '%s'", io_state)
         if (
-            io_state != "Waiting for master to send event"
+            io_state != "Waiting for source to send event"
             and io_state != "Reconnecting after a failed source event read"
         ):
             return False
 
-        if not "Replica_SQL_Running_State" in slave_status[0]:
-            logging.error(
-                "Invalid output, Replica_SQL_Running_State not found %s", slave_status
-            )
-            return False
-
-        # Data is not completely proessed
-        sql_state = slave_status[0]["Replica_SQL_Running_State"]
+        sql_state = status.get("Replica_SQL_Running_State", "")
         logging.debug("Follower SQL state is '%s'", sql_state)
         if sql_state != "Replica has read all relay log; waiting for more updates":
             return False

@@ -72,27 +72,33 @@ for required_var in required_envvars_or_secrets:
 
 logging.info("Starting MySQL cluster manager with operation: %s", args.operation)
 
-# Perform operations
-if args.operation == "join_or_bootstrap":
-    signal.signal(signal.SIGTERM, Actions.terminate_handler)
-    Actions.join_or_bootstrap()
-elif args.operation == "execute_file":
-    signal.signal(signal.SIGTERM, Actions.terminate_handler)
-    Actions.execute_file()
-elif args.operation == "mysql_backup":
-    Snapshot.create()
-elif args.operation == "mysql_restore":
-    Snapshot.restore()
-elif args.operation == "mysql_start":
-    Mysql.server_start()
-elif args.operation == "mysql_stop":
-    Mysql.server_stop()
-elif args.operation == "mysql_autobackup":
-    Mysql.create_backup_if_needed()
-elif args.operation == "proxysql_init":
-    Proxysql.inital_setup()
-    nodes = Consul.get_instance().get_all_registered_nodes()
-    Proxysql.set_mysql_server(nodes)
-else:
-    logging.error("Unknown operation: %s", {args.operation})
+try:
+    # Perform operations
+    if args.operation == "join_or_bootstrap":
+        signal.signal(signal.SIGTERM, Actions.terminate_handler)
+        Actions.join_or_bootstrap()
+    elif args.operation == "execute_file":
+        signal.signal(signal.SIGTERM, Actions.terminate_handler)
+        Actions.execute_file()
+    elif args.operation == "mysql_backup":
+        Snapshot.create()
+    elif args.operation == "mysql_restore":
+        Snapshot.restore()
+    elif args.operation == "mysql_start":
+        Mysql.server_start()
+    elif args.operation == "mysql_stop":
+        Mysql.server_stop()
+    elif args.operation == "mysql_autobackup":
+        Mysql.create_backup_if_needed()
+    elif args.operation == "proxysql_init":
+        Proxysql.inital_setup()
+        nodes = Consul.get_instance().get_all_registered_nodes()
+        Proxysql.set_mysql_server(nodes)
+    else:
+        logging.error("Unknown operation: %s", {args.operation})
+        sys.exit(1)
+except SystemExit:
+    raise
+except Exception:
+    logging.exception("Unhandled exception, exiting")
     sys.exit(1)

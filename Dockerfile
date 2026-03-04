@@ -22,8 +22,8 @@ RUN \
     rpm -i /tmp/xtrabackup.rpm && \
     rm /tmp/xtrabackup.rpm && \
     # Install Consul CLI
-    wget https://releases.hashicorp.com/consul/1.22.3/consul_1.22.3_linux_amd64.zip -O /tmp/consul.zip && \
-    echo "0942ef6ed43522adfb4cddbefea2f0e64306318afb8aeab3727563f0caef04be /tmp/consul.zip" | sha256sum -c && \
+    wget https://releases.hashicorp.com/consul/1.22.5/consul_1.22.5_linux_amd64.zip -O /tmp/consul.zip && \
+    echo "58603b87fd085282f882fcd02b5165c93b321692514b2ab822dec8dd4cd028a3 /tmp/consul.zip" | sha256sum -c && \
     unzip /tmp/consul.zip -d /usr/local/bin && \
     rm /usr/local/bin/LICENSE.txt && \
     rm /tmp/consul.zip && \

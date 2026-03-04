@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timedelta
+from typing import ClassVar
 
 from mcm.consul import Consul
 from mcm.mysql import Mysql
@@ -18,8 +19,8 @@ from mcm.utils import Utils
 class Actions:
     """The actions of the application"""
 
-    consul_process = None
-    mysql_process = None
+    consul_process: ClassVar[subprocess.Popen[bytes] | None] = None
+    mysql_process: ClassVar[subprocess.Popen[bytes] | None] = None
 
     @staticmethod
     def join_or_bootstrap():
@@ -141,14 +142,20 @@ class Actions:
         # to an extra thread. The loop needs to refresh the
         # Consul sessions every few seconds.
         while True:
-            if Actions.consul_process.poll() is not None:
+            if (
+                Actions.consul_process is not None
+                and Actions.consul_process.poll() is not None
+            ):
                 logging.error(
                     "Consul process has exited with code %s, exiting",
                     Actions.consul_process.returncode,
                 )
                 sys.exit(1)
 
-            if Actions.mysql_process.poll() is not None:
+            if (
+                Actions.mysql_process is not None
+                and Actions.mysql_process.poll() is not None
+            ):
                 logging.error(
                     "MySQL process has exited with code %s, exiting",
                     Actions.mysql_process.returncode,
@@ -203,7 +210,11 @@ class Actions:
 
                 # Attempt to become leader if the replica is healthy - this will only occur if the original leader
                 # has gone offline. Do not promote if currently snapshotting.
-                if not replication_leader and replication_healthy and not Snapshot.is_snapshotting:
+                if (
+                    not replication_leader
+                    and replication_healthy
+                    and not Snapshot.is_snapshotting
+                ):
                     promotion = Consul.get_instance().try_to_become_replication_leader()
 
                     # Are we the new leader?

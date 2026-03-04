@@ -1,23 +1,29 @@
-"""This file contains the actions of the cluster manager"""
+"""This module contains the Actions class for the MCM"""
 
 import logging
 import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timedelta
+from types import FrameType
 from typing import ClassVar
 
-from mcm.consul import Consul
-from mcm.mysql import Mysql
-from mcm.proxysql import Proxysql
-from mcm.snapshot import Snapshot
-from mcm.utils import Utils
+from .consul import Consul
+from .mysql import Mysql
+from .proxysql import Proxysql
+from .snapshot import Snapshot
+from .utils import Utils
 
 
 class Actions:
-    """The actions of the application"""
+    """
+    Actions class.
+
+    Handles the initialisation, main action loop and threaded functionality of the MCM.
+    """
 
     consul_process: ClassVar[subprocess.Popen[bytes] | None] = None
     mysql_process: ClassVar[subprocess.Popen[bytes] | None] = None
@@ -66,7 +72,7 @@ class Actions:
         needInitialSnapshot = False
 
         if replication_leader and not snapshotExists:
-            Mysql.init_database_if_needed()
+            Mysql.initialize_database()
             needInitialSnapshot = True
         elif not replication_leader and not snapshotExists:
             logging.info("We are not the replication leader, waiting for backups")
@@ -95,8 +101,10 @@ class Actions:
         Proxysql.inital_setup()
 
         # Get data from MySQL
-        mysql_version = Mysql.execute_query_as_root("SELECT version()")[0]["version()"]
-        server_id = Mysql.execute_query_as_root("SELECT @@GLOBAL.server_id")[0][
+        mysql_version = Mysql.execute_statement_as_root("SELECT version()")[0][
+            "version()"
+        ]
+        server_id = Mysql.execute_statement_as_root("SELECT @@GLOBAL.server_id")[0][
             "@@GLOBAL.server_id"
         ]
 
@@ -105,7 +113,7 @@ class Actions:
         )
 
         # Remove the old replication configuration (e.g., from backup)
-        Mysql.delete_replication_config()
+        Mysql.make_primary_instance()
 
         # Register service as leader or follower
         Consul.get_instance().register_service(replication_leader)
@@ -219,14 +227,14 @@ class Actions:
 
                     # Are we the new leader?
                     if promotion:
-                        Mysql.delete_replication_config()
+                        Mysql.make_primary_instance()
                         Consul.get_instance().register_service(True)
                         replication_leader = True
 
                 # Check for correct replication leader (skip during snapshot)
                 if not replication_leader and not Snapshot.is_snapshotting:
                     real_leader = Consul.get_instance().get_replication_leader_ip()
-                    configured_leader = Mysql.get_replication_leader_ip()
+                    configured_leader = Mysql.get_replication_source_ip()
 
                     if real_leader is not None and real_leader != configured_leader:
                         logging.info(
@@ -234,7 +242,7 @@ class Actions:
                             configured_leader,
                             real_leader,
                         )
-                        Mysql.change_to_replication_client(real_leader)
+                        Mysql.make_read_only_replica(real_leader)
 
             # Keep Consul sessions alive
             if Utils.is_refresh_needed(last_session_refresh, timedelta(seconds=5)):
@@ -244,7 +252,7 @@ class Actions:
             # Create MySQL Backups (using extra thread for backup)
             if Utils.is_refresh_needed(last_backup_check, timedelta(minutes=1)):
                 Consul.get_instance().start_session_auto_refresh_thread()
-                Mysql.create_backup_if_needed()
+                Actions.do_snapshot_if_needed()
                 last_backup_check = datetime.now()
                 Consul.get_instance().stop_session_auto_refresh_thread()
 
@@ -259,7 +267,7 @@ class Actions:
         if Snapshot.exists():
             logging.warning("Snapshot already exists, this will be overwritten")
 
-        Mysql.init_database_if_needed()
+        Mysql.initialize_database()
 
         # Start MySQL
         Actions.mysql_process = Mysql.server_start(skip_config_build=True)
@@ -302,7 +310,43 @@ class Actions:
         Mysql.server_stop()
 
     @staticmethod
-    def terminate_handler(signum, frame):
+    def do_snapshot_if_needed() -> None:
+        """
+        Creates a new snapshot if the current snapshot is expired.
+
+        Snapshots will be created on a replica instance only, to prevent the primary (writable)
+        instance from being locked while a snapshot is taking place.
+        """
+
+        logging.debug("Checking for backups")
+
+        consul_client = Consul.get_instance()
+
+        if consul_client.is_replication_leader():
+            logging.debug(
+                "We are the replication master, skipping backup check as snapshots run on replicas"
+            )
+            return
+
+        if Snapshot.isPending():
+            logging.debug("A snapshot is already in progress, skipping")
+            return
+
+        backup_date = Snapshot.getTime()
+        maxage_seconds = int(Utils.get_envvar_or_secret("SNAPSHOT_MINUTES", "15")) * 60
+
+        if maxage_seconds < 60:
+            maxage_seconds = 60
+
+        if Utils.is_refresh_needed(backup_date, timedelta(seconds=maxage_seconds)):
+            logging.info("Snapshot is outdated (%s), creating new one", backup_date)
+
+            # Perform backup in extra thread to prevent Consul loop interruption
+            backup_thread = threading.Thread(target=Snapshot.create)
+            backup_thread.start()
+
+    @staticmethod
+    def terminate_handler(signum: int, _: FrameType | None) -> None:
         """
         Termination handler for the main event loop
         """

@@ -7,12 +7,12 @@ import logging
 import signal
 import sys
 
-from mcm.actions import Actions
-from mcm.consul import Consul
-from mcm.mysql import Mysql
-from mcm.proxysql import Proxysql
-from mcm.snapshot import Snapshot
-from mcm.utils import Utils
+from .mcm.actions import Actions
+from .mcm.consul import Consul
+from .mcm.mysql import Mysql
+from .mcm.proxysql import Proxysql
+from .mcm.snapshot import Snapshot
+from .mcm.utils import Utils
 
 parser = argparse.ArgumentParser(
     description="MySQL cluster manager",
@@ -30,17 +30,23 @@ AVAILABLE_OPERATIONS = [
     "execute_file",
 ]
 
-parser.add_argument(
+_ = parser.add_argument(
     "operation",
     metavar="operation",
     help=f"Operation to be executed ({AVAILABLE_OPERATIONS})",
 )
 
 log_levels = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
-parser.add_argument("--log-level", default="INFO", choices=log_levels)
+_ = parser.add_argument("--log-level", default="INFO", choices=log_levels)
+
 
 # Parse args
-args = parser.parse_args()
+class Args(argparse.Namespace):
+    operation: str = ""
+    log_level: str = "INFO"
+
+
+args = parser.parse_args(namespace=Args())
 
 # Configure logging
 logging.basicConfig(
@@ -60,7 +66,7 @@ required_envvars_or_secrets = [
 
 for required_var in required_envvars_or_secrets:
     try:
-        Utils.get_envvar_or_secret(required_var)
+        _ = Utils.get_envvar_or_secret(required_var)
     except Exception:
         logging.error(
             'Missing required environment variable "%s" - please define environment variable "%s" or environment file "%s"_FILE',
@@ -75,10 +81,10 @@ logging.info("Starting MySQL cluster manager with operation: %s", args.operation
 try:
     # Perform operations
     if args.operation == "join_or_bootstrap":
-        signal.signal(signal.SIGTERM, Actions.terminate_handler)
+        _ = signal.signal(signal.SIGTERM, Actions.terminate_handler)
         Actions.join_or_bootstrap()
     elif args.operation == "execute_file":
-        signal.signal(signal.SIGTERM, Actions.terminate_handler)
+        _ = signal.signal(signal.SIGTERM, Actions.terminate_handler)
         Actions.execute_file()
     elif args.operation == "mysql_backup":
         Snapshot.create()
@@ -88,8 +94,8 @@ try:
         Mysql.server_start()
     elif args.operation == "mysql_stop":
         Mysql.server_stop()
-    elif args.operation == "mysql_autobackup":
-        Mysql.create_backup_if_needed()
+    elif args.operation == "mysql_snapshot":
+        Actions.do_snapshot_if_needed()
     elif args.operation == "proxysql_init":
         Proxysql.inital_setup()
         nodes = Consul.get_instance().get_all_registered_nodes()

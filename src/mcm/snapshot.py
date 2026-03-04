@@ -6,9 +6,10 @@ import subprocess
 import time
 from shutil import move, rmtree
 
-from mcm.consul import Consul
-from mcm.mysql import Mysql
-from mcm.utils import Utils
+from .consul import Consul
+from .utils import Utils
+
+XTRABACKUP_PATH = "/usr/bin/xtrabackup"
 
 
 class Snapshot:
@@ -139,7 +140,7 @@ class Snapshot:
             backupUser = Utils.get_envvar_or_secret("MYSQL_BACKUP_USER")
             backupPass = Utils.get_envvar_or_secret("MYSQL_BACKUP_PASSWORD")
             xtrabackup = [
-                Mysql.xtrabackup_binary,
+                XTRABACKUP_PATH,
                 f"--user={backupUser}",
                 f"--password={backupPass}",
                 "--backup",
@@ -153,7 +154,7 @@ class Snapshot:
 
             # Prepare backup
             xtrabackup_prepare = [
-                Mysql.xtrabackup_binary,
+                XTRABACKUP_PATH,
                 "--prepare",
                 f"--target-dir={Snapshot.pendingPath}",
             ]
@@ -186,6 +187,8 @@ class Snapshot:
     def restore():
         """Restore MySQL server from a snapshot"""
 
+        from .mysql import DATA_DIR
+
         if not Snapshot.exists():
             logging.error("No snapshot to restore")
             return False
@@ -206,17 +209,17 @@ class Snapshot:
 
             logging.info("Restoring snapshot from %s", Snapshot.currentPath)
 
-            if os.path.isfile(f"{Mysql.mysql_datadir}/ib_logfile0"):
+            if os.path.isfile(f"{DATA_DIR}/ib_logfile0"):
                 logging.info("MySQL is already initialized, cleaning up first")
                 currentTime = time.time()
-                oldMysqlDir = f"{Mysql.mysql_datadir}_restore_{currentTime}"
+                oldMysqlDir = f"{DATA_DIR}_restore_{currentTime}"
 
                 os.mkdir(oldMysqlDir, 0o700)
 
                 # Renaming file per file, on some docker images
                 # the complete directory can not be moved
-                for entry in os.listdir(Mysql.mysql_datadir):
-                    sourcePath = f"{Mysql.mysql_datadir}/{entry}"
+                for entry in os.listdir(DATA_DIR):
+                    sourcePath = f"{DATA_DIR}/{entry}"
                     destPath = f"{oldMysqlDir}/{entry}"
                     logging.debug("Moving %s to %s", sourcePath, destPath)
                     move(sourcePath, destPath)
@@ -225,7 +228,7 @@ class Snapshot:
 
             # Restore backup
             xtrabackup = [
-                Mysql.xtrabackup_binary,
+                XTRABACKUP_PATH,
                 "--copy-back",
                 f"--target-dir={Snapshot.currentPath}",
             ]
@@ -248,13 +251,13 @@ class Snapshot:
             if oldMysqlDir:
                 logging.info("Restoring old MySQL data from %s", oldMysqlDir)
 
-                for entry in os.listdir(Mysql.mysql_datadir):
-                    sourcePath = f"{Mysql.mysql_datadir}/{entry}"
+                for entry in os.listdir(DATA_DIR):
+                    sourcePath = f"{DATA_DIR}/{entry}"
                     rmtree(sourcePath)
 
                 for entry in os.listdir(oldMysqlDir):
                     sourcePath = f"{oldMysqlDir}/{entry}"
-                    destPath = f"{Mysql.mysql_datadir}/{entry}"
+                    destPath = f"{DATA_DIR}/{entry}"
                     move(sourcePath, destPath)
 
             Consul.get_instance().node_set_restoring_flag(restoring=False)

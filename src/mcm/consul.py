@@ -11,7 +11,7 @@ import time
 import consul as pyconsul
 import netifaces
 
-from mcm.utils import Utils
+from .utils import Utils
 
 
 class Consul:
@@ -610,7 +610,7 @@ class Consul:
         logging.error("Unable to mark node as snapshotting")
         return False
 
-    def node_set_replication_unhealthy_flag(self, unhealthy=True):
+    def node_set_replication_unhealthy_flag(self, unhealthy: bool = True) -> None:
         """
         Marks the current node as having unhealthy replication. Unhealthy nodes
         are excluded from ProxySQL routing to prevent serving stale reads.
@@ -635,7 +635,7 @@ class Consul:
 
                 if get_result[1] is None or get_result[1]["Value"] is None:
                     logging.error("Node %s not registered in Consul", ip_address)
-                    return False
+                    return
 
                 node_data = json.loads(get_result[1]["Value"])
                 node_data["replication_unhealthy"] = unhealthy
@@ -658,9 +658,6 @@ class Consul:
                     logging.error(
                         "Unable to mark replication unhealthy flag on %s", path
                     )
-                    return False
-
-                return True
             except:
                 logging.warning(
                     "Unable to mark node as replication unhealthy in Consul, retrying in 5 seconds"
@@ -668,7 +665,6 @@ class Consul:
                 time.sleep(5)
 
         logging.error("Unable to mark node as replication unhealthy")
-        return False
 
     def are_nodes_restoring(self):
         """

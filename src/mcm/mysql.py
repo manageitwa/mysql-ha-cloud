@@ -383,7 +383,7 @@ class Mysql:
         return Mysql._server_process
 
     @staticmethod
-    def server_stop() -> None:
+    def server_stop(use_root_password: bool = True) -> None:
         """
         Stop the MySQL server if it is currently active
         """
@@ -395,9 +395,19 @@ class Mysql:
 
         # Try to shutdown the server
         instance = Mysql(
-            "root", Utils.get_envvar_or_secret("MYSQL_ROOT_PASSWORD"), use_socket=True
+            "root",
+            Utils.get_envvar_or_secret("MYSQL_ROOT_PASSWORD")
+            if use_root_password
+            else None,
+            use_socket=True,
         )
-        _ = instance.execute_statement_as_root("SHUTDOWN", return_result=False)
+        _ = instance.execute_statement(
+            "SHUTDOWN",
+            password=Utils.get_envvar_or_secret("MYSQL_ROOT_PASSWORD")
+            if use_root_password
+            else None,
+            return_result=False,
+        )
 
         _ = Mysql._server_process.wait()
         Mysql._server_process = None
@@ -456,95 +466,125 @@ class Mysql:
             raise Exception(f"Unable to initialize MySQL data directory at {DATA_DIR}")
 
         # Start server the first time
-        mysql_process = Mysql.server_start(
-            use_root_password=False, skip_config_build=True
-        )
+        _ = Mysql.server_start(use_root_password=False, skip_config_build=True)
 
         # Create connection instance
         instance = Mysql("root")
 
         # Create application user
         logging.debug("Creating MySQL user for the application")
-        application_user = Utils.get_envvar_or_secret("MYSQL_USER")
-        application_password = Utils.get_envvar_or_secret("MYSQL_PASSWORD")
 
-        Mysql.execute_statement_or_exit(
-            f"CREATE USER '{application_user}'@'%' "
-            f"IDENTIFIED WITH caching_sha2_password BY '{application_password}'"
-        )
-
-        # Create backup user
-        logging.debug("Creating MySQL user for backups")
-        backup_user = Utils.get_envvar_or_secret("MYSQL_BACKUP_USER")
-        backup_password = Utils.get_envvar_or_secret("MYSQL_BACKUP_PASSWORD")
-        Mysql.execute_statement_or_exit(
-            f"CREATE USER '{backup_user}'@'localhost' "
-            f"IDENTIFIED WITH caching_sha2_password BY '{backup_password}'"
-        )
-        Mysql.execute_statement_or_exit(
-            "GRANT BACKUP_ADMIN, PROCESS, RELOAD, LOCK TABLES, REPLICATION CLIENT, REPLICATION_SLAVE_ADMIN, "
-            f"REPLICATION CLIENT ON *.* TO '{backup_user}'@'localhost'"
-        )
-        Mysql.execute_statement_or_exit(
-            "GRANT SELECT ON performance_schema.log_status TO "
-            f"'{backup_user}'@'localhost'"
-        )
-        Mysql.execute_statement_or_exit(
-            "GRANT SELECT ON performance_schema.keyring_component_status TO "
-            f"'{backup_user}'@'localhost'"
-        )
-        Mysql.execute_statement_or_exit(
-            "GRANT SELECT ON performance_schema.replication_group_members TO "
-            f"'{backup_user}'@'localhost'"
-        )
-
-        # Create replication user
-        logging.debug("Creating replication user")
-        replication_user = Utils.get_envvar_or_secret("MYSQL_REPLICATION_USER")
-        replication_password = Utils.get_envvar_or_secret("MYSQL_REPLICATION_PASSWORD")
-        Mysql.execute_statement_or_exit(
-            f"CREATE USER '{replication_user}'@'%' "
-            f"IDENTIFIED WITH caching_sha2_password BY '{replication_password}'"
-        )
-        Mysql.execute_statement_or_exit(
-            f"GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '{replication_user}'@'%'"
-        )
-
-        # Change permissions for the root user
-        logging.debug("Set permissions for the root user")
-        root_password = Utils.get_envvar_or_secret("MYSQL_ROOT_PASSWORD")
-        Mysql.execute_statement_or_exit(
-            f"CREATE USER 'root'@'%' IDENTIFIED WITH caching_sha2_password BY '{root_password}'"
-        )
-        Mysql.execute_statement_or_exit(
-            "GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION"
-        )
-        Mysql.execute_statement_or_exit(
-            "ALTER USER 'root'@'localhost' "
-            f"IDENTIFIED WITH caching_sha2_password BY '{root_password}'"
+        _ = instance.execute_statement_or_exit(
+            """
+                CREATE USER %(user)s@'%'
+                IDENTIFIED WITH caching_sha2_password BY %(password)s
+            """,
+            {
+                "user": Utils.get_envvar_or_secret("MYSQL_USER"),
+                "password": Utils.get_envvar_or_secret("MYSQL_PASSWORD"),
+            },
         )
 
         # Create database if specified
         if Utils.get_envvar_or_secret("MYSQL_DATABASE"):
-            database_name = Utils.get_envvar_or_secret("MYSQL_DATABASE")
             logging.debug("Setting up initial database")
-            Mysql.execute_statement_or_exit(
-                sql=f"CREATE DATABASE IF NOT EXISTS `{database_name}`",
-                username="root",
-                password=root_password,
+
+            _ = instance.execute_statement_or_exit(
+                "CREATE DATABASE IF NOT EXISTS %(database)s",
+                {
+                    "database": Utils.get_envvar_or_secret("MYSQL_DATABASE"),
+                },
             )
-            Mysql.execute_statement_or_exit(
-                sql=f"GRANT ALL PRIVILEGES ON `{database_name}`.* TO '{application_user}'@'%'",
-                username="root",
-                password=root_password,
+            _ = instance.execute_statement_or_exit(
+                "GRANT ALL PRIVILEGES ON %(database)s TO %(user)s@'%'",
+                {
+                    "database": Utils.get_envvar_or_secret("MYSQL_DATABASE"),
+                    "user": Utils.get_envvar_or_secret("MYSQL_USER"),
+                },
             )
 
-        # Shutdown MySQL server
-        logging.debug("Inital MySQL setup done, shutdown server..")
-        Mysql.execute_statement_or_exit(
-            sql="SHUTDOWN", username="root", password=root_password
+        # Create backup user
+        logging.debug("Creating MySQL user for backups")
+
+        _ = instance.execute_statement_or_exit(
+            """
+                CREATE USER %(user)s@'%'
+                IDENTIFIED WITH caching_sha2_password BY %(password)s
+            """,
+            {
+                "user": Utils.get_envvar_or_secret("MYSQL_BACKUP_USER"),
+                "password": Utils.get_envvar_or_secret("MYSQL_BACKUP_PASSWORD"),
+            },
         )
-        mysql_process.wait()
+        _ = instance.execute_statement_or_exit(
+            "GRANT BACKUP_ADMIN, PROCESS, RELOAD, LOCK TABLES, REPLICATION CLIENT, REPLICATION_SLAVE_ADMIN ON *.* TO %(user)s@'%'",
+            {
+                "user": Utils.get_envvar_or_secret("MYSQL_BACKUP_USER"),
+            },
+        )
+        _ = instance.execute_statement_or_exit(
+            "GRANT SELECT ON performance_schema.log_status TO %(user)s@'%'",
+            {
+                "user": Utils.get_envvar_or_secret("MYSQL_BACKUP_USER"),
+            },
+        )
+        _ = instance.execute_statement_or_exit(
+            "GRANT SELECT ON performance_schema.keyring_component_status TO %(user)s@'%'",
+            {
+                "user": Utils.get_envvar_or_secret("MYSQL_BACKUP_USER"),
+            },
+        )
+        _ = instance.execute_statement_or_exit(
+            "GRANT SELECT ON performance_schema.replication_group_members TO %(user)s@'%'",
+            {
+                "user": Utils.get_envvar_or_secret("MYSQL_BACKUP_USER"),
+            },
+        )
+
+        # Create replication user
+        logging.debug("Creating replication user")
+
+        _ = instance.execute_statement_or_exit(
+            """
+                CREATE USER %(user)s@'%'
+                IDENTIFIED WITH caching_sha2_password BY %(password)s
+            """,
+            {
+                "user": Utils.get_envvar_or_secret("MYSQL_REPLICATION_USER"),
+                "password": Utils.get_envvar_or_secret("MYSQL_REPLICATION_PASSWORD"),
+            },
+        )
+        _ = instance.execute_statement_or_exit(
+            "GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO %(user)s@'%'",
+            {
+                "user": Utils.get_envvar_or_secret("MYSQL_REPLICATION_USER"),
+            },
+        )
+
+        # Change permissions for the root user
+        logging.debug("Set password for the root user")
+
+        # NOTE: Not sure this needed - no external root access is provided through ProxySQL, nor should it be
+        # Mysql.execute_statement_or_exit(
+        #     f"CREATE USER 'root'@'%' IDENTIFIED WITH caching_sha2_password BY '{root_password}'"
+        # )
+        # Mysql.execute_statement_or_exit(
+        #     "GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION"
+        # )
+
+        _ = instance.execute_statement_or_exit(
+            """
+            ALTER USER 'root'@'localhost'
+            IDENTIFIED WITH caching_sha2_password BY %(password)s
+            """,
+            {
+                "password": Utils.get_envvar_or_secret("MYSQL_ROOT_PASSWORD"),
+            },
+        )
+
+        # Shutdown MySQL server
+        logging.debug("Initial MySQL setup done, shutdown server..")
+        Mysql.server_stop()
 
     @staticmethod
     def build_configuration() -> None:
@@ -595,19 +635,6 @@ class Mysql:
         config.close()
 
     @staticmethod
-    def restore_backup_or_exit() -> None:
-        """
-        Restore a backup or exit
-        """
-        from .snapshot import Snapshot
-
-        result = Snapshot.restore()
-
-        if not result:
-            logging.error("Unable to restore MySQL backup")
-            sys.exit(1)
-
-    @staticmethod
     def check_replication_user_privileges() -> None:
         """
         Ensures that replication user privileges are still set correctly. This prevents the foot-gun
@@ -618,22 +645,41 @@ class Mysql:
         replication_user = Utils.get_envvar_or_secret("MYSQL_REPLICATION_USER")
         replication_password = Utils.get_envvar_or_secret("MYSQL_REPLICATION_PASSWORD")
 
-        grants = Mysql.execute_statement_as_root(
-            f"SHOW GRANTS FOR '{replication_user}'@'%'"
-        )[0].get(f"Grants for {replication_user}@%", "")
+        instance = Mysql(
+            "root", Utils.get_envvar_or_secret("MYSQL_ROOT_PASSWORD"), use_socket=True
+        )
+
+        grants = instance.execute_statement_as_root(
+            "SHOW GRANTS FOR %(user)s@'%'", {"user": replication_user}
+        )
+
+        if grants is None:
+            logging.error("Failed to fetch grants for replication user")
+            return
+
+        grants = grants[0].get(f"Grants for {replication_user}@%", "")
         logging.debug(grants)
 
         if grants == "":
             logging.debug("Re-creating replication user")
 
-            Mysql.execute_statement_as_root(
-                f"CREATE USER '{replication_user}'@'%' "
-                f"IDENTIFIED WITH caching_sha2_password BY '{replication_password}'"
+            _ = instance.execute_statement_as_root(
+                """
+                CREATE USER %(user)s
+                IDENTIFIED WITH caching_sha2_password BY %(password)s
+                """,
+                {
+                    "user": replication_user,
+                    "password": replication_password,
+                },
             )
-            Mysql.execute_statement_as_root(
-                f"GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '{replication_user}'@'%'"
+
+            _ = instance.execute_statement_as_root(
+                "GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO %(user)s@'%'",
+                {
+                    "user": replication_user,
+                },
             )
-            Mysql.execute_statement_as_root("FLUSH PRIVILEGES")
         elif (
             grants
             != f"GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO {replication_user}@%"
@@ -642,12 +688,22 @@ class Mysql:
                 "Deleting and re-creating replication user due to incorrect permissions"
             )
 
-            Mysql.execute_statement_as_root(f"DROP USER '{replication_user}'@'%'")
-            Mysql.execute_statement_as_root(
-                f"CREATE USER '{replication_user}'@'%' "
-                f"IDENTIFIED WITH caching_sha2_password BY '{replication_password}'"
+            _ = instance.execute_statement_as_root(
+                "DROP USER %(user)s@'%'", {"user": replication_user}
             )
-            Mysql.execute_statement_as_root(
-                f"GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '{replication_user}'@'%'"
+            _ = instance.execute_statement_as_root(
+                """
+                CREATE USER %(user)s
+                IDENTIFIED WITH caching_sha2_password BY %(password)s
+                """,
+                {
+                    "user": replication_user,
+                    "password": replication_password,
+                },
             )
-            Mysql.execute_statement_as_root("FLUSH PRIVILEGES")
+            _ = instance.execute_statement_as_root(
+                "GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO %(user)s@'%'",
+                {
+                    "user": replication_user,
+                },
+            )

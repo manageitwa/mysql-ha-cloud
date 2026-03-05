@@ -1,5 +1,3 @@
-"""This module contains the MySQL class for the MCM"""
-
 import logging
 import os
 import subprocess

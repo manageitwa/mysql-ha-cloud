@@ -1,5 +1,3 @@
-"""This file contains the Snapshot related actions"""
-
 import logging
 import os
 import subprocess

@@ -1,5 +1,3 @@
-"""This module contains constants for the MCM"""
-
 DATA_DIR = "/var/lib/mysql"
 """Path to MySQL data directory"""
 

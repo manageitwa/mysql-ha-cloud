@@ -1,5 +1,3 @@
-"""This file is part of the MySQL cluster manager"""
-
 import json
 import logging
 import socket

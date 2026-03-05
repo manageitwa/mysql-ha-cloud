@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-"""This file is part of the MySQL Cluster Manager (MCM)"""
-
 import argparse
 import logging
 import signal

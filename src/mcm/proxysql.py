@@ -1,5 +1,3 @@
-"""This file contains the ProxySQL related actions"""
-
 import logging
 import os
 import subprocess

@@ -1,5 +1,3 @@
-"""This module contains the Utility class for the MCM"""
-
 import os
 from datetime import datetime, timedelta
 

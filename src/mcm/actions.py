@@ -1,5 +1,3 @@
-"""This module contains the Actions class for the MCM"""
-
 import logging
 import os
 import signal

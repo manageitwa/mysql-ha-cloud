@@ -11,12 +11,9 @@ from typing import cast
 import mysql.connector
 from mysql.connector.types import MySQLConvertibleType, RowItemType
 
+from .constants import DATA_DIR, MYSQLD_PATH, SOCKET_PATH
 from .consul import Consul
 from .utils import Utils
-
-DATA_DIR = "/var/lib/mysql"
-MYSQLD_PATH = "/usr/sbin/mysqld"
-SOCKET_PATH = "/var/run/mysqld/mysqld.sock"
 
 
 class Mysql:
@@ -65,7 +62,7 @@ class Mysql:
                 user=username if username else self._username,
                 password=password if password else self._password,
                 database=database if database else self._database,
-                unix_socket="/var/run/mysqld/mysqld.sock" if self._use_socket else None,
+                unix_socket=SOCKET_PATH if self._use_socket else None,
             )
 
             cursor = conn.cursor(dictionary=True, prepared=len(params) != 0)
@@ -427,7 +424,7 @@ class Mysql:
                     if use_root_password
                     else None,
                     database=None,
-                    unix_socket="/var/run/mysqld/mysqld.sock",
+                    unix_socket=SOCKET_PATH,
                 )
                 conn.close()
                 logging.debug("MySQL connection successfully")

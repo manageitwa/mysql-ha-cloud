@@ -6,10 +6,9 @@ import subprocess
 import time
 from shutil import move, rmtree
 
+from .constants import DATA_DIR, XTRABACKUP_PATH
 from .consul import Consul
 from .utils import Utils
-
-XTRABACKUP_PATH = "/usr/bin/xtrabackup"
 
 
 class Snapshot:
@@ -186,8 +185,6 @@ class Snapshot:
     @staticmethod
     def restore():
         """Restore MySQL server from a snapshot"""
-
-        from .mysql import DATA_DIR
 
         if not Snapshot.exists():
             logging.error("No snapshot to restore")

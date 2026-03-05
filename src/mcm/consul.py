@@ -17,30 +17,32 @@ class Consul:
     This class encapsulates all Consul related things
     """
 
-    # The signeton instance
+    # The singleton instance
     __instance = None
 
     # KV prefix
-    kv_prefix = "mcm/"
+    kv_prefix: str = "mcm/"
 
     # Server ID key
-    kv_server_id = kv_prefix + "server_id"
+    kv_server_id: str = kv_prefix + "server_id"
 
     # Instances ID key
-    instances_path = kv_prefix + "instances/"
+    instances_path: str = kv_prefix + "instances/"
 
     # Instances session key
-    instances_session_key = kv_prefix + "instances"
+    instances_session_key: str = kv_prefix + "instances"
 
     # Replication leader path
-    replication_leader_path = kv_prefix + "replication_leader"
+    replication_leader_path: str = kv_prefix + "replication_leader"
 
     def __init__(self):
         """
         Init the Consul client
         """
         if Consul.__instance is not None:
-            raise Exception("This class is a singleton!")
+            raise Exception(
+                "The Consul class is a singleton - please use get_instance() to get the instance"
+            )
 
         Consul.__instance = self
         logging.info("Register Consul connection")
@@ -48,8 +50,8 @@ class Consul:
         # Allow 30 seconds for Consul agent to start
         for _ in range(6):
             try:
-                self.client = pyconsul.Consul()
-            except:
+                self.client: pyconsul.Consul = pyconsul.Consul()  # pyright: ignore[reportPrivateLocalImportUsage]
+            except Exception:
                 logging.warning("Unable to connect to Consul, retrying in 5 seconds")
                 time.sleep(5)
                 continue
@@ -59,12 +61,12 @@ class Consul:
 
         self.node_health_session = None
         self.create_node_health_session()
-        self.mysql_version = None
-        self.server_id = None
+        self.mysql_version: str | None = None
+        self.server_id: str | None = None
 
         # The session auto refresh thread
-        self.auto_refresh_thread = None
-        self.run_auto_refresh_thread = False
+        self.auto_refresh_thread: threading.Thread | None = None
+        self.run_auto_refresh_thread: bool = False
 
     @staticmethod
     def get_instance():
@@ -74,7 +76,7 @@ class Consul:
 
         return Consul.__instance
 
-    def start_session_auto_refresh_thread(self):
+    def start_session_auto_refresh_thread(self) -> None:
         """
         Start the session auto refresh thread
         """
@@ -85,16 +87,16 @@ class Consul:
         )
         self.auto_refresh_thread.start()
 
-    def auto_refresh_sessions(self):
+    def auto_refresh_sessions(self) -> None:
         """
         Auto refresh the active sessions
         """
         while self.run_auto_refresh_thread:
             logging.debug("Refreshing active consul sessions from auto refresh thread")
-            self.refresh_sessions()
+            _ = self.refresh_sessions()
             time.sleep(5)
 
-    def stop_session_auto_refresh_thread(self):
+    def stop_session_auto_refresh_thread(self) -> None:
         """
         Stop the session auto refresh thread
         """
@@ -125,7 +127,7 @@ class Consul:
                 )
 
                 return self.node_health_session
-            except:
+            except Exception:
                 logging.warning(
                     "Unable to create a session in Consul, retrying in 5 seconds"
                 )
@@ -134,7 +136,7 @@ class Consul:
         if session is None:
             raise Exception("Unable to create node health session")
 
-    def get_all_registered_nodes(self):
+    def get_all_registered_nodes(self) -> list[str]:
         """
         Get all registered MySQL nodes
         """
@@ -734,7 +736,7 @@ class Consul:
 
         return False
 
-    def refresh_sessions(self):
+    def refresh_sessions(self) -> bool:
         """
         Refresh the active sessions
         """
@@ -793,7 +795,7 @@ class Consul:
         return True
 
     @staticmethod
-    def agent_start():
+    def agent_start() -> subprocess.Popen[bytes]:
         """
         Start the local Consul agent.
         """
@@ -842,7 +844,7 @@ class Consul:
         return consul_process
 
     @staticmethod
-    def getLocalIp():
+    def getLocalIp() -> str | None:
         """
         Get the local IP, based on the service being bootstrapped
         """

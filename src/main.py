@@ -23,7 +23,6 @@ AVAILABLE_OPERATIONS = [
     "mysql_restore",
     "mysql_start",
     "mysql_stop",
-    "mysql_autobackup",
     "proxysql_init",
     "execute_file",
 ]

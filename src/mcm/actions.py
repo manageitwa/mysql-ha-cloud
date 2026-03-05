@@ -72,19 +72,23 @@ class Actions:
         if replication_leader and not snapshotExists:
             Mysql.initialize_database()
             needInitialSnapshot = True
-        elif not replication_leader and not snapshotExists:
-            logging.info("We are not the replication leader, waiting for backups")
-            snapshotExists = Snapshot.waitForSnapshot()
-
+        elif not replication_leader:
+            # Wait for a snapshot if we are a replica and the leader is currently initialising
             if not snapshotExists:
-                logging.error(
-                    "No snapshot available, please check master logs or incomplete snapshot, exiting"
-                )
-                sys.exit(1)
+                logging.info("We are not the replication leader, waiting for backups")
+                snapshotExists = Snapshot.waitForSnapshot()
 
-            Mysql.restore_backup_or_exit()
-        else:
-            Mysql.restore_backup_or_exit()
+                if not snapshotExists:
+                    logging.error(
+                        "No snapshot available, please check master logs or incomplete snapshot, exiting"
+                    )
+                    sys.exit(1)
+
+            result = Snapshot.restore()
+
+            if not result:
+                logging.error("Unable to restore MySQL backup")
+                sys.exit(1)
 
         # Start ProxySQL
         Proxysql.start_proxysql()

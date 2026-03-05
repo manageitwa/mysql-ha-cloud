@@ -10,9 +10,9 @@ from .utils import Utils
 
 
 class Snapshot:
-    pendingPath = "/snapshots/pending"
-    currentPath = "/snapshots/current"
-    is_snapshotting = False
+    pendingPath: str = "/snapshots/pending"
+    currentPath: str = "/snapshots/current"
+    is_snapshotting: bool = False
 
     @staticmethod
     def exists():

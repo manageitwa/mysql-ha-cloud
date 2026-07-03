@@ -166,6 +166,11 @@ class Proxysql:
         Proxysql.perform_sql_query("LOAD MYSQL USERS TO RUNTIME")
         Proxysql.perform_sql_query("LOAD MYSQL QUERY RULES TO RUNTIME")
 
+        Proxysql.perform_sql_query("SAVE MYSQL VARIABLES TO DISK")
+        Proxysql.perform_sql_query("SAVE MYSQL SERVERS TO DISK")
+        Proxysql.perform_sql_query("SAVE MYSQL USERS TO DISK")
+        Proxysql.perform_sql_query("SAVE MYSQL QUERY RULES TO DISK")
+
     @staticmethod
     def set_mysql_server(mysql_servers):
         """
@@ -195,6 +200,7 @@ class Proxysql:
             )
 
         Proxysql.perform_sql_query("LOAD MYSQL SERVERS TO RUNTIME")
+        Proxysql.perform_sql_query("SAVE MYSQL SERVERS TO DISK")
 
     def update_mysql_server_if_needed(self, current_mysql_servers):
         """

@@ -21,9 +21,9 @@ jobs:
 
       - name: Release
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PACKAGE_DEPLOY_TOKEN }}
           FORGEJO_URL: https://source.selfmanager.net.au
-          FORGEJO_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          FORGEJO_TOKEN: ${{ secrets.PACKAGE_DEPLOY_TOKEN }}
           REPOSITORY: ${{ forgejo.repository }}
           WORKFLOW_FILE: build-image.yml
         run: npx --package semantic-release --package @semantic-release/exec --package @ribbon-studios/semantic-release-forgejo semantic-release

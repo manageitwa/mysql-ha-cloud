@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Required
+: "${FORGEJO_URL:?FORGEJO_URL is required (e.g. https://forgejo.example.com)}"
+: "${FORGEJO_TOKEN:?FORGEJO_TOKEN is required}"
+: "${REPOSITORY:?REPOSITORY is required}"
+: "${WORKFLOW_FILE:?WORKFLOW_FILE is required (e.g. build-image.yml)}"
+
+# Optional
+REF="${1:-${REF:-main}}"
+INPUTS="${INPUTS:-{}}"
+
+PAYLOAD=$(printf '{"ref":"%s","inputs":%s}' "$REF" "$INPUTS")
+
+response=$(curl -sS -w "\n%{http_code}" \
+  -X POST \
+  -H "Authorization: token ${FORGEJO_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "$PAYLOAD" \
+  "${FORGEJO_URL}/api/v1/repos/${REPOSITORY}/actions/workflows/${WORKFLOW_FILE}/dispatches")
+
+http_code=$(printf '%s' "$response" | tail -n1)
+body=$(printf '%s' "$response" | sed '$d')
+
+if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
+  echo "Dispatched ${WORKFLOW_FILE} on ref '${REF}' (HTTP ${http_code})"
+else
+  echo "Error dispatching workflow (HTTP ${http_code}): ${body}" >&2
+  exit 1
+fi

@@ -44,12 +44,13 @@ RUN \
 # Install Cluster Manager and dependencies, and set up volume
 WORKDIR /cluster
 
-COPY mysql_cluster_manager/requirements .
-COPY mysql_cluster_manager/src .
+COPY requirements.txt .
+COPY src/mcm .
+COPY src/main.py .
 
 # Install Python dependencies
 ENV PYTHONUSERBASE=/cluster/.prefix
-RUN pip3 install --no-cache-dir --user -r requirements
+RUN pip3 install --no-cache-dir --user -r requirements.txt
 
 COPY entrypoint.sh .
 

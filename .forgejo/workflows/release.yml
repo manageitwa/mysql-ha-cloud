@@ -26,4 +26,4 @@ jobs:
           FORGEJO_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           REPOSITORY: ${{ forgejo.repository }}
           WORKFLOW_FILE: build-image.yml
-        run: npx --package semantic-release --package @semantic-release/exec semantic-release
+        run: npx --package semantic-release --package @semantic-release/exec --package @ribbon-studios/semantic-release-forgejo semantic-release

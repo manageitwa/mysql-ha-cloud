@@ -10,20 +10,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
       - name: Set up Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
 
       - name: Release
         env:
-          GITHUB_TOKEN: ${{ secrets.PACKAGE_DEPLOY_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           FORGEJO_URL: https://source.selfmanager.net.au
-          FORGEJO_TOKEN: ${{ secrets.PACKAGE_DEPLOY_TOKEN }}
-          REPOSITORY: ${{ forgejo.repository }}
+          FORGEJO_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          REPO_OWNER: ${{ forgejo.repository_owner }}
+          REPO_NAME: "mysql-ha-cloud"
           WORKFLOW_FILE: build-image.yml
         run: npx --package semantic-release --package @semantic-release/exec --package @ribbon-studios/semantic-release-forgejo semantic-release

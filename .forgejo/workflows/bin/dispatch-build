@@ -4,7 +4,8 @@ set -euo pipefail
 # Required
 : "${FORGEJO_URL:?FORGEJO_URL is required (e.g. https://forgejo.example.com)}"
 : "${FORGEJO_TOKEN:?FORGEJO_TOKEN is required}"
-: "${REPOSITORY:?REPOSITORY is required}"
+: "${REPO_OWNER:?REPO_OWNER is required}"
+: "${REPO_NAME:?REPO_NAME is required}"
 : "${WORKFLOW_FILE:?WORKFLOW_FILE is required (e.g. build-image.yml)}"
 
 # Optional
@@ -18,7 +19,7 @@ response=$(curl -sS -w "\n%{http_code}" \
   -H "Authorization: token ${FORGEJO_TOKEN}" \
   -H "Content-Type: application/json" \
   -d "$PAYLOAD" \
-  "${FORGEJO_URL}/api/v1/repos/${REPOSITORY}/actions/workflows/${WORKFLOW_FILE}/dispatches")
+  "${FORGEJO_URL}/api/v1/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WORKFLOW_FILE}/dispatches")
 
 http_code=$(printf '%s' "$response" | tail -n1)
 body=$(printf '%s' "$response" | sed '$d')

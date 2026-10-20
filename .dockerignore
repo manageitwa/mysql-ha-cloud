@@ -1,0 +1,20 @@
+# Version control
+.git
+.gitignore
+
+# Python caches / build artifacts
+**/__pycache__
+*.py[cod]
+*.egg-info
+.venv
+venv
+
+# Editor / OS cruft
+.idea
+.vscode
+*.swp
+.DS_Store
+
+# Docs and local dev files not needed in the image
+*.md
+dev.docker-compose.yml

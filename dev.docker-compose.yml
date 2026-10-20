@@ -5,12 +5,13 @@ networks:
 
 services:
   mysql:
+    build: .
     image: manageitwa/mysql-ha-cloud:test
     command: --log-level DEBUG
     environment:
-      CONSUL_BOOTSTRAP_EXPECT: 3
+      CONSUL_BOOTSTRAP_EXPECT: 2
       CONSUL_ENABLE_UI: "true"
-      SNAPSHOT_MINUTES: 3
+      SNAPSHOT_MINUTES: 30
 
       # Obviously, don't use these credentials in production
       MYSQL_ROOT_PASSWORD: root_pass
@@ -44,7 +45,7 @@ services:
       - /tmp/consul
     stop_grace_period: 15s
     deploy:
-      replicas: 3
+      replicas: 2
       restart_policy:
         condition: on-failure
         delay: 30s

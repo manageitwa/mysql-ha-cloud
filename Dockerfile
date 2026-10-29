@@ -71,5 +71,7 @@ COPY entrypoint.sh .
 VOLUME /snapshots
 EXPOSE 6032/tcp 6033/tcp
 STOPSIGNAL SIGTERM
+HEALTHCHECK --interval=10s --timeout=5s --retries=3 --start-period=1m --start-interval=1s \
+    CMD ["/cluster/main.py", "--log-level", "WARNING", "healthcheck"]
 ENTRYPOINT ["/cluster/entrypoint.sh"]
 CMD ["join_or_bootstrap"]

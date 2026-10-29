@@ -328,6 +328,16 @@ class Actions:
         return True
 
     @staticmethod
+    def healthcheck():
+        """
+        Check that ProxySQL is running and configured, so this node can accept queries. The state
+        of MySQL and the rest of the cluster is not checked, as Docker replaces unhealthy containers
+        and only adds healthy containers to the service DNS used to discover the other nodes.
+        """
+        if not Proxysql.is_configured():
+            sys.exit(1)
+
+    @staticmethod
     def execute_file():
         """
         Execute an SQL file on the MySQL server and prime the snapshot

@@ -28,6 +28,7 @@ AVAILABLE_OPERATIONS = [
     "mysql_autobackup",
     "proxysql_init",
     "execute_file",
+    "healthcheck",
 ]
 
 parser.add_argument(
@@ -90,6 +91,8 @@ try:
         Mysql.server_stop()
     elif args.operation == "mysql_autobackup":
         Mysql.create_backup_if_needed()
+    elif args.operation == "healthcheck":
+        Actions.healthcheck()
     elif args.operation == "proxysql_init":
         Proxysql.inital_setup()
         nodes = Consul.get_instance().get_registered_node_states()

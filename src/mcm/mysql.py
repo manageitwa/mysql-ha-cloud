@@ -23,7 +23,6 @@ class Mysql:
     mysql_server_binary = "/usr/sbin/mysqld"
     mysqld_binary = "/usr/sbin/mysqld"
     mysql_datadir = "/var/lib/mysql"
-    _replication_unhealthy_flag = False
     _replication_lagging = False
 
     @staticmethod
@@ -263,6 +262,7 @@ class Mysql:
         slave_status = Mysql.execute_query_as_root("SHOW REPLICA STATUS")
 
         if len(slave_status) != 1:
+            Mysql.set_replication_unhealthy_flag(True)
             return False
 
         status = slave_status[0]
@@ -316,29 +316,26 @@ class Mysql:
                 else:
                     logging.info("Replication restart succeeded")
 
-            if not Mysql._replication_unhealthy_flag:
-                Consul.get_instance().node_set_replication_unhealthy_flag(True)
-                Mysql._replication_unhealthy_flag = True
+            Mysql.set_replication_unhealthy_flag(True)
             return False
 
-        # Both threads are running — clear unhealthy flag and check if fully caught up
-        if Mysql._replication_unhealthy_flag:
-            Consul.get_instance().node_set_replication_unhealthy_flag(False)
-            Mysql._replication_unhealthy_flag = False
-
+        # Both threads are running — the replica is healthy unless it is lagging behind
         seconds_behind = status.get("Seconds_Behind_Source")
         lag_threshold = int(
             Utils.get_envvar_or_secret("MYSQL_REPLICATION_LAG_THRESHOLD", "5")
         )
-        if lag_threshold > 0:
-            if seconds_behind is not None and seconds_behind > lag_threshold:
-                logging.warning("Replica is %s seconds behind source", seconds_behind)
-                Consul.get_instance().node_set_replication_unhealthy_flag(True)
-                Mysql._replication_lagging = True
-            else:
-                logging.debug("Replica is %s seconds behind source", seconds_behind)
-                Consul.get_instance().node_set_replication_unhealthy_flag(False)
-                Mysql._replication_lagging = False
+        if (
+            lag_threshold > 0
+            and seconds_behind is not None
+            and seconds_behind > lag_threshold
+        ):
+            logging.warning("Replica is %s seconds behind source", seconds_behind)
+            Mysql._replication_lagging = True
+        else:
+            logging.debug("Replica is %s seconds behind source", seconds_behind)
+            Mysql._replication_lagging = False
+
+        Mysql.set_replication_unhealthy_flag(Mysql._replication_lagging)
 
         io_state = status.get("Replica_IO_State", "")
         logging.debug("Follower IO state is '%s'", io_state)
@@ -354,6 +351,16 @@ class Mysql:
             return False
 
         return True
+
+    @staticmethod
+    def set_replication_unhealthy_flag(unhealthy):
+        """
+        Publish the replication health of this node to Consul if it has changed
+        """
+        consul = Consul.get_instance()
+
+        if consul.replication_unhealthy != unhealthy:
+            consul.node_set_replication_unhealthy_flag(unhealthy)
 
     @staticmethod
     def server_start(use_root_password=True, skip_config_build=False):

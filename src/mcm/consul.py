@@ -64,6 +64,9 @@ class Consul:
         self.mysql_version = None
         self.server_id = None
 
+        # Last replication health state published for this node
+        self.replication_unhealthy = False
+
         # The session auto refresh thread
         self.auto_refresh_thread = None
         self.run_auto_refresh_thread = False
@@ -136,11 +139,11 @@ class Consul:
         if session is None:
             raise Exception("Unable to create node health session")
 
-    def get_all_registered_nodes(self):
+    def get_registered_node_data(self):
         """
-        Get all registered MySQL nodes
+        Get the data of all registered MySQL nodes
         """
-        mysql_nodes = []
+        nodes = []
 
         # Allow 3 minutes of retries to get the nodes as this will usually only fail on a potential
         # network downtime
@@ -157,44 +160,58 @@ class Consul:
                             logging.error("ip_address missing in %s", node)
                             continue
 
-                        if "restoring" in node_data and node_data["restoring"] is True:
-                            logging.debug(
-                                "Skipping node %s as it is currently restoring",
-                                node_data,
-                            )
-                            continue
+                        nodes.append(node_data)
 
-                        if (
-                            "snapshotting" in node_data
-                            and node_data["snapshotting"] is True
-                        ):
-                            logging.debug(
-                                "Skipping node %s as it is currently snapshotting",
-                                node_data,
-                            )
-                            continue
-
-                        if (
-                            "replication_unhealthy" in node_data
-                            and node_data["replication_unhealthy"] is True
-                        ):
-                            logging.debug(
-                                "Skipping node %s as replication is unhealthy",
-                                node_data,
-                            )
-                            continue
-
-                        ip_address = node_data["ip_address"]
-                        mysql_nodes.append(ip_address)
-
-                return mysql_nodes
+                return nodes
             except:
                 logging.warning(
                     "Unable to get registered nodes from Consul, retrying in 5 seconds"
                 )
                 time.sleep(5)
 
-        return mysql_nodes
+        return nodes
+
+    @staticmethod
+    def is_node_available(node_data):
+        """
+        Check if a node is able to serve queries (not restoring, snapshotting or
+        with unhealthy replication)
+        """
+        if "restoring" in node_data and node_data["restoring"] is True:
+            logging.debug("Node %s is currently restoring", node_data)
+            return False
+
+        if "snapshotting" in node_data and node_data["snapshotting"] is True:
+            logging.debug("Node %s is currently snapshotting", node_data)
+            return False
+
+        if (
+            "replication_unhealthy" in node_data
+            and node_data["replication_unhealthy"] is True
+        ):
+            logging.debug("Node %s has unhealthy replication", node_data)
+            return False
+
+        return True
+
+    def get_all_registered_nodes(self):
+        """
+        Get all registered MySQL nodes that are available to serve queries
+        """
+        return [
+            node_data["ip_address"]
+            for node_data in self.get_registered_node_data()
+            if Consul.is_node_available(node_data)
+        ]
+
+    def get_registered_node_states(self):
+        """
+        Get all registered MySQL nodes, mapped to whether they are available to serve queries
+        """
+        return {
+            node_data["ip_address"]: Consul.is_node_available(node_data)
+            for node_data in self.get_registered_node_data()
+        }
 
     def get_mysql_server_id(self):
         """
@@ -420,7 +437,7 @@ class Consul:
                         "mysql_version": "",
                         "snapshotting": False,
                         "restoring": False,
-                        "replication_unhealthy": False,
+                        "replication_unhealthy": self.replication_unhealthy,
                     }
                 )
 
@@ -613,7 +630,7 @@ class Consul:
     def node_set_replication_unhealthy_flag(self, unhealthy=True):
         """
         Marks the current node as having unhealthy replication. Unhealthy nodes
-        are excluded from ProxySQL routing to prevent serving stale reads.
+        are set to OFFLINE_SOFT in ProxySQL to prevent serving stale reads.
         """
 
         # Allow a minute for node info to be populated
@@ -660,6 +677,7 @@ class Consul:
                     )
                     return False
 
+                self.replication_unhealthy = unhealthy
                 return True
             except:
                 logging.warning(

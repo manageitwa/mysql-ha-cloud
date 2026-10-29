@@ -56,7 +56,9 @@ class Actions:
         # Keep session alive until we start the main loop
         Consul.get_instance().start_session_auto_refresh_thread()
 
-        # Register node
+        # Register the node. Replicas are registered as unhealthy so ProxySQL does
+        # not route queries to them until replication is ready.
+        Consul.get_instance().replication_unhealthy = not replication_leader
         Consul.get_instance().register_node()
 
         logging.info(
@@ -169,8 +171,9 @@ class Actions:
                 last_replication_leader_check = datetime.now()
 
                 # Update ProxySQL nodes
-                mysql_nodes = Consul.get_instance().get_all_registered_nodes()
-                proxysql.update_mysql_server_if_needed(mysql_nodes)
+                mysql_nodes = Consul.get_instance().get_registered_node_states()
+                leader_ip = Consul.get_instance().get_replication_leader_ip()
+                proxysql.update_mysql_server_if_needed(mysql_nodes, leader_ip)
 
                 replication_leader = Consul.get_instance().is_replication_leader()
                 replication_healthy = False
@@ -220,6 +223,7 @@ class Actions:
                     # Are we the new leader?
                     if promotion:
                         Mysql.delete_replication_config()
+                        Mysql.set_replication_unhealthy_flag(False)
                         Consul.get_instance().register_service(True)
                         replication_leader = True
 

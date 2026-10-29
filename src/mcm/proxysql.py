@@ -18,7 +18,7 @@ class Proxysql:
         """
         Init the instance
         """
-        self.configured_mysql_hosts = ()
+        self.configured_mysql_servers = None
 
     @staticmethod
     def inital_setup():
@@ -87,12 +87,9 @@ class Proxysql:
                 "WHERE variable_name='mysql-ssl_p2s_key'"
             )
 
-        # Configure read write hostgroup (writer = 1, reader = 2)
+        # Hostgroups (writer = 1, reader = 2) are assigned from the Consul replication leader in
+        # set_mysql_server(), so ProxySQL must not move servers between them based on read_only
         Proxysql.perform_sql_query("DELETE FROM mysql_replication_hostgroups")
-        Proxysql.perform_sql_query(
-            "INSERT INTO mysql_replication_hostgroups "
-            "(writer_hostgroup, reader_hostgroup,comment) VALUES (1, 2, 'cluster1')"
-        )
 
         # Configure read write split
         Proxysql.perform_sql_query(
@@ -172,6 +169,34 @@ class Proxysql:
         Proxysql.perform_sql_query("SAVE MYSQL QUERY RULES TO DISK")
 
     @staticmethod
+    def build_mysql_servers(mysql_nodes, leader_ip):
+        """
+        Build the backend MySQL server rows as (hostgroup, hostname, status, max_replication_lag).
+
+        The leader is placed in the writer hostgroup and replicas are placed in the reader
+        hostgroup. Nodes that are unavailable (restoring, snapshotting or unhealthy replication)
+        are set to OFFLINE_SOFT so existing connections can finish, but no new connections are
+        sent to them.
+        """
+        max_lag = int(
+            Utils.get_envvar_or_secret("MYSQL_REPLICATION_LAG_THRESHOLD", "5")
+        )
+
+        mysql_servers = []
+
+        for ip_address, available in mysql_nodes.items():
+            status = "ONLINE" if available else "OFFLINE_SOFT"
+
+            if ip_address == leader_ip:
+                mysql_servers.append((1, ip_address, status, 0))
+            else:
+                mysql_servers.append((2, ip_address, status, max_lag))
+
+        mysql_servers.sort()
+
+        return mysql_servers
+
+    @staticmethod
     def set_mysql_server(mysql_servers):
         """
         Set the backend MySQL server
@@ -179,43 +204,45 @@ class Proxysql:
         logging.info("Removing all old backend MySQL Server")
         Proxysql.perform_sql_query("DELETE FROM mysql_servers")
 
-        max_lag = int(
-            Utils.get_envvar_or_secret("MYSQL_REPLICATION_LAG_THRESHOLD", "5")
-        )
+        if (
+            Utils.get_envvar("MYSQL_TLS_CA", False)
+            and Utils.get_envvar("MYSQL_TLS_CERT", False)
+            and Utils.get_envvar("MYSQL_TLS_KEY", False)
+        ):
+            use_ssl = 1
+        else:
+            use_ssl = 0
 
-        for mysql_server in mysql_servers:
-            logging.info("Adding %s as backend MySQL Server", mysql_server)
-            if (
-                Utils.get_envvar("MYSQL_TLS_CA", False)
-                and Utils.get_envvar("MYSQL_TLS_CERT", False)
-                and Utils.get_envvar("MYSQL_TLS_KEY", False)
-            ):
-                use_ssl = 1
-            else:
-                use_ssl = 0
+        for hostgroup, ip_address, status, max_lag in mysql_servers:
+            logging.info(
+                "Adding %s as backend MySQL Server (hostgroup=%s, status=%s)",
+                ip_address,
+                hostgroup,
+                status,
+            )
 
             Proxysql.perform_sql_query(
-                "INSERT INTO mysql_servers(hostgroup_id, hostname, port, use_ssl, max_replication_lag) "
-                f"VALUES (1, '{mysql_server}', 3306, {use_ssl}, {max_lag})"
+                "INSERT INTO mysql_servers(hostgroup_id, hostname, port, status, use_ssl, max_replication_lag) "
+                f"VALUES ({hostgroup}, '{ip_address}', 3306, '{status}', {use_ssl}, {max_lag})"
             )
 
         Proxysql.perform_sql_query("LOAD MYSQL SERVERS TO RUNTIME")
         Proxysql.perform_sql_query("SAVE MYSQL SERVERS TO DISK")
 
-    def update_mysql_server_if_needed(self, current_mysql_servers):
+    def update_mysql_server_if_needed(self, mysql_nodes, leader_ip):
         """
         Update the MySQL-Servers if needed (changed)
         """
-        current_mysql_servers.sort()
+        mysql_servers = Proxysql.build_mysql_servers(mysql_nodes, leader_ip)
 
-        if self.configured_mysql_hosts != current_mysql_servers:
+        if self.configured_mysql_servers != mysql_servers:
             logging.info(
                 "MySQL backend has changed (old=%s, new=%s), reconfiguring",
-                self.configured_mysql_hosts,
-                current_mysql_servers,
+                self.configured_mysql_servers,
+                mysql_servers,
             )
-            Proxysql.set_mysql_server(current_mysql_servers)
-            self.configured_mysql_hosts = current_mysql_servers
+            Proxysql.set_mysql_server(mysql_servers)
+            self.configured_mysql_servers = mysql_servers
             return True
 
         return False

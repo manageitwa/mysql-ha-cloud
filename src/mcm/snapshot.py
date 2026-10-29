@@ -130,10 +130,17 @@ class Snapshot:
         os.makedirs(Snapshot.pendingPath)
 
         try:
-            if not force:
-                Consul.get_instance().node_set_snapshotting_flag(snapshotting=True)
-
+            # Set before updating Consul so the replication health check does not clear the
+            # unhealthy flag while the snapshot is starting
             Snapshot.is_snapshotting = True
+
+            if not force:
+                # A replica does not apply updates while snapshotting, so it is unhealthy until the
+                # replication health check finds it has caught up again
+                if not fromSource:
+                    Mysql.set_replication_unhealthy_flag(True)
+
+                Consul.get_instance().node_set_snapshotting_flag(snapshotting=True)
 
             # Create mysql backup
             backupUser = Utils.get_envvar_or_secret("MYSQL_BACKUP_USER")
@@ -167,19 +174,21 @@ class Snapshot:
 
             move(Snapshot.pendingPath, Snapshot.currentPath)
 
-            Snapshot.is_snapshotting = False
-
+            # Clear in Consul before resuming the replication health check, so the health check
+            # does not write back a stale snapshotting flag
             if not force:
                 Consul.get_instance().node_set_snapshotting_flag(snapshotting=False)
+
+            Snapshot.is_snapshotting = False
 
             logging.info("Snapshot was successfully created")
             return True
         except:
             logging.exception("Failed to create snapshot")
-            Snapshot.is_snapshotting = False
             Snapshot.resetPending()
             if not force:
                 Consul.get_instance().node_set_snapshotting_flag(snapshotting=False)
+            Snapshot.is_snapshotting = False
             return False
 
     @staticmethod

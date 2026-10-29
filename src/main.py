@@ -92,8 +92,9 @@ try:
         Mysql.create_backup_if_needed()
     elif args.operation == "proxysql_init":
         Proxysql.inital_setup()
-        nodes = Consul.get_instance().get_all_registered_nodes()
-        Proxysql.set_mysql_server(nodes)
+        nodes = Consul.get_instance().get_registered_node_states()
+        leader_ip = Consul.get_instance().get_replication_leader_ip()
+        Proxysql.set_mysql_server(Proxysql.build_mysql_servers(nodes, leader_ip))
     else:
         logging.error("Unknown operation: %s", {args.operation})
         sys.exit(1)

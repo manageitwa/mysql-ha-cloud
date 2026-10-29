@@ -590,7 +590,7 @@ class Mysql:
             Mysql.execute_query_as_root("FLUSH PRIVILEGES")
         elif (
             grants
-            != f"GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO {replication_user}@%"
+            != f"GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO `{replication_user}`@`%`"
         ):
             logging.debug(
                 "Deleting and re-creating replication user due to incorrect permissions"

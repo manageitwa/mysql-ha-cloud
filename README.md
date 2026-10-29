@@ -62,9 +62,9 @@ Only one volume is strictly required - the `/snapshots` volume. This volume stor
 Each node running this image contains the following:
 
 - A MySQL 8.4 server instance
-- A Consul 1.21 agent running in server mode
-- ProxySQL 3.0.2 installed
-- The contents of this repo's `mysql_cluster_manager` directory, acting as a Python 3 entrypoint/daemon.
+- A Consul 1.22 agent running in server mode
+- ProxySQL 3.1.11 installed
+- The contents of this repo's `src` directory, acting as a Python 3 entrypoint/daemon.
 - A `snapshots` folder that contains the current snapshot of the database. This is a full [XtraBackup](https://www.percona.com/mysql/software/percona-xtrabackup) snapshot of the database.
 
 It is expected that at least 3 nodes are made available as part of this service to provide a tolerance of 1 lost node. Each node can become a MySQL leader and/or a [Consul](https://developer.hashicorp.com/consul) leader, making all other nodes a follower for each service. These nodes must be connected to the same overlay network in order to communicate with one another. Consul acts as the "source of truth" for the purposes of determining available MySQL nodes and defining which MySQL node is the leader.

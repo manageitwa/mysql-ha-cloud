@@ -353,6 +353,56 @@ class Mysql:
         return True
 
     @staticmethod
+    def has_applied_relay_log():
+        """
+        Check that all transactions received from the replication leader have been applied
+        """
+        slave_status = Mysql.execute_query_as_root("SHOW REPLICA STATUS")
+
+        # Replication is not configured, so there is nothing to apply
+        if len(slave_status) != 1:
+            return True
+
+        status = slave_status[0]
+
+        return (
+            status.get("Replica_SQL_Running") == "Yes"
+            and status.get("Replica_SQL_Running_State")
+            == "Replica has read all relay log; waiting for more updates"
+        )
+
+    @staticmethod
+    def get_leader_gtids():
+        """
+        Get the set of transactions executed on this replica that were received from its
+        replication leader. Transactions from other servers are excluded, as replicas may have
+        executed transactions locally or inherited them from a snapshot of another replica.
+        """
+        slave_status = Mysql.execute_query_as_root("SHOW REPLICA STATUS")
+
+        if len(slave_status) != 1 or not slave_status[0].get("Source_UUID"):
+            return ""
+
+        all_leader_gtids = f"{slave_status[0]['Source_UUID']}:1-9223372036854775806"
+
+        return Mysql.execute_query_as_root(
+            "SELECT GTID_SUBTRACT(@@GLOBAL.gtid_executed, "
+            "GTID_SUBTRACT(@@GLOBAL.gtid_executed, %s)) AS gtids",
+            params=(all_leader_gtids,),
+        )[0]["gtids"]
+
+    @staticmethod
+    def is_gtid_subset(subset, superset):
+        """
+        Check if all transactions in one GTID set are contained in another
+        """
+        result = Mysql.execute_query_as_root(
+            "SELECT GTID_SUBSET(%s, %s) AS is_subset", params=(subset, superset)
+        )
+
+        return result[0]["is_subset"] == 1
+
+    @staticmethod
     def set_replication_unhealthy_flag(unhealthy):
         """
         Publish the replication health of this node to Consul if it has changed
@@ -401,7 +451,7 @@ class Mysql:
             Mysql.execute_statement(sql="SHUTDOWN", password=root_password)
 
     @staticmethod
-    def execute_query_as_root(sql, database="mysql", discard_result=False):
+    def execute_query_as_root(sql, database="mysql", discard_result=False, params=None):
         """
         Execute the SQL query and return result.
         """
@@ -419,7 +469,7 @@ class Mysql:
             )
 
             cur = cnx.cursor(dictionary=True, buffered=True)
-            cur.execute(sql)
+            cur.execute(sql, params)
 
             if discard_result:
                 return None
@@ -526,6 +576,11 @@ class Mysql:
             logging.debug(
                 "We are the replication master, skipping backup check as snapshots run on replicas"
             )
+            return False
+
+        # A snapshotting replica cannot be promoted, so do not start a snapshot during a failover
+        if consul_client.get_replication_leader_ip() is None:
+            logging.debug("No replication leader available, skipping backup check")
             return False
 
         if Snapshot.isPending():

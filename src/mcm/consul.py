@@ -67,6 +67,9 @@ class Consul:
         # Last replication health state published for this node
         self.replication_unhealthy = False
 
+        # Executed transactions published for this node while the replication leader is missing
+        self.failover_gtids = None
+
         # The session auto refresh thread
         self.auto_refresh_thread = None
         self.run_auto_refresh_thread = False
@@ -193,16 +196,6 @@ class Consul:
             return False
 
         return True
-
-    def get_all_registered_nodes(self):
-        """
-        Get all registered MySQL nodes that are available to serve queries
-        """
-        return [
-            node_data["ip_address"]
-            for node_data in self.get_registered_node_data()
-            if Consul.is_node_available(node_data)
-        ]
 
     def get_registered_node_states(self):
         """
@@ -438,6 +431,7 @@ class Consul:
                         "snapshotting": False,
                         "restoring": False,
                         "replication_unhealthy": self.replication_unhealthy,
+                        "failover_gtids": self.failover_gtids,
                     }
                 )
 
@@ -686,6 +680,59 @@ class Consul:
                 time.sleep(5)
 
         logging.error("Unable to mark node as replication unhealthy")
+        return False
+
+    def node_set_failover_gtids(self, gtids=None):
+        """
+        Publishes the transactions executed on the current node while the replication leader is
+        missing, so that replicas can determine which of them has the most recent data to become
+        the new leader. Cleared (None) once a leader is available.
+        """
+
+        # Allow a minute for node info to be populated
+        for _ in range(12):
+            try:
+                logging.debug("Set failover GTIDs in Consul to %s", gtids)
+
+                ip_address = Consul.getLocalIp()
+
+                get_result = self.client.kv.get(f"{Consul.instances_path}{ip_address}")
+                logging.debug("Got result %s", get_result)
+
+                if get_result[1] is None or get_result[1]["Value"] is None:
+                    logging.error("Node %s not registered in Consul", ip_address)
+                    return False
+
+                node_data = json.loads(get_result[1]["Value"])
+                node_data["failover_gtids"] = gtids
+
+                json_string = json.dumps(node_data)
+
+                path = f"{Consul.instances_path}{ip_address}"
+                logging.debug(
+                    "Consul: Path %s, value %s (session %s)",
+                    path,
+                    json_string,
+                    self.node_health_session,
+                )
+
+                put_result = self.client.kv.put(
+                    path, json_string, acquire=self.node_health_session
+                )
+
+                if not put_result:
+                    logging.error("Unable to set failover GTIDs on %s", path)
+                    return False
+
+                self.failover_gtids = gtids
+                return True
+            except:
+                logging.warning(
+                    "Unable to set failover GTIDs in Consul, retrying in 5 seconds"
+                )
+                time.sleep(5)
+
+        logging.error("Unable to set failover GTIDs")
         return False
 
     def are_nodes_restoring(self):

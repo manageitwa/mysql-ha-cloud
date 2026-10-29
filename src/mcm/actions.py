@@ -36,12 +36,17 @@ class Actions:
         snapshotExists = Snapshot.exists()
 
         # Test for unstable environment (other nodes are present and no leader is present)
-        # We don't want to become the new leader on the restored backup directly
+        # We don't want to become the new leader on the restored backup directly - all registered
+        # nodes are counted, including unhealthy ones, as they will promote a new leader from data
+        # that is more recent than the snapshot
         #
         # Needs be be checked before Consul.get_instance().register_node() is called
         #
         while Consul.get_instance().get_replication_leader_ip() is None:
-            nodes = Consul.get_instance().get_all_registered_nodes()
+            nodes = [
+                node_data["ip_address"]
+                for node_data in Consul.get_instance().get_registered_node_data()
+            ]
 
             if len(nodes) == 0:
                 logging.info("No other nodes detected, we can become the leader")
@@ -90,8 +95,10 @@ class Actions:
         # Start MySQL
         mysql_process = Mysql.server_start()
 
-        # Check replication user
-        Mysql.check_replication_user_privileges()
+        # Check replication user - only on the leader, as the user is replicated to the replicas and
+        # changes made on a replica would be transactions that the other replicas do not have
+        if replication_leader:
+            Mysql.check_replication_user_privileges()
 
         # Configure ProxySQL
         Proxysql.inital_setup()
@@ -133,6 +140,7 @@ class Actions:
         last_backup_check = None
         last_session_refresh = None
         last_replication_leader_check = None
+        leader_missing_since = None
         replication_failure_count = 0
         max_replication_failures = 12
         replication_lag_count = 0
@@ -176,13 +184,27 @@ class Actions:
                 proxysql.update_mysql_server_if_needed(mysql_nodes, leader_ip)
 
                 replication_leader = Consul.get_instance().is_replication_leader()
-                replication_healthy = False
 
-                # Allow an unhealthy replica 60 seconds to restart before killing it off
                 if replication_leader:
                     replication_failure_count = 0
                     replication_lag_count = 0
+                elif leader_ip is None:
+                    # The leader has gone offline, so replication cannot be healthy until a new leader
+                    # is promoted. Do not count failures, and try to become the new leader instead.
+                    # Do not promote if currently snapshotting.
+                    replication_failure_count = 0
+                    replication_lag_count = 0
+
+                    if leader_missing_since is None:
+                        logging.warning("Replication leader is missing, starting failover")
+                        leader_missing_since = datetime.now()
+
+                    if not Snapshot.is_snapshotting and Actions.try_failover(
+                        leader_missing_since
+                    ):
+                        replication_leader = True
                 else:
+                    # Allow an unhealthy replica 60 seconds to restart before killing it off
                     replication_healthy = Mysql.is_replication_healthy()
 
                     if replication_healthy:
@@ -211,21 +233,12 @@ class Actions:
                     else:
                         replication_lag_count = 0
 
-                # Attempt to become leader if the replica is healthy - this will only occur if the original leader
-                # has gone offline. Do not promote if currently snapshotting.
-                if (
-                    not replication_leader
-                    and replication_healthy
-                    and not Snapshot.is_snapshotting
-                ):
-                    promotion = Consul.get_instance().try_to_become_replication_leader()
+                # A leader is available, so any failover has finished
+                if leader_ip is not None:
+                    leader_missing_since = None
 
-                    # Are we the new leader?
-                    if promotion:
-                        Mysql.delete_replication_config()
-                        Mysql.set_replication_unhealthy_flag(False)
-                        Consul.get_instance().register_service(True)
-                        replication_leader = True
+                    if Consul.get_instance().failover_gtids is not None:
+                        Consul.get_instance().node_set_failover_gtids(None)
 
                 # Check for correct replication leader (skip during snapshot)
                 if not replication_leader and not Snapshot.is_snapshotting:
@@ -253,6 +266,66 @@ class Actions:
                 Consul.get_instance().stop_session_auto_refresh_thread()
 
             time.sleep(1)
+
+    @staticmethod
+    def try_failover(leader_missing_since):
+        """
+        Try to become the new replication leader after the leader has gone offline. A replica is
+        only promoted once it has applied all transactions received from the old leader, and has
+        every transaction from the old leader that the other replicas have, so that no
+        transactions are lost.
+        """
+        consul = Consul.get_instance()
+
+        if not Mysql.has_applied_relay_log():
+            logging.info("Waiting for the relay log to be applied before failover")
+            return False
+
+        # Publish the transactions received from the old leader so the other replicas can compare
+        # against them
+        leader_gtids = Mysql.get_leader_gtids()
+
+        if consul.failover_gtids != leader_gtids:
+            consul.node_set_failover_gtids(leader_gtids)
+
+        # Replicas that are stuck or snapshotting may never publish their transactions, so they
+        # are ignored after a while
+        wait_expired = datetime.now() - leader_missing_since > timedelta(seconds=30)
+        local_ip = Consul.getLocalIp()
+
+        for node_data in consul.get_registered_node_data():
+            ip_address = node_data["ip_address"]
+
+            if ip_address == local_ip or node_data.get("restoring") is True:
+                continue
+
+            node_gtids = node_data.get("failover_gtids")
+
+            if node_gtids is None:
+                if wait_expired:
+                    continue
+
+                logging.info(
+                    "Waiting for %s to publish executed transactions before failover",
+                    ip_address,
+                )
+                return False
+
+            if not Mysql.is_gtid_subset(node_gtids, leader_gtids):
+                logging.info(
+                    "Replica %s has received transactions that we have not, not promoting",
+                    ip_address,
+                )
+                return False
+
+        if not consul.try_to_become_replication_leader():
+            return False
+
+        Mysql.delete_replication_config()
+        Mysql.set_replication_unhealthy_flag(False)
+        consul.register_service(True)
+
+        return True
 
     @staticmethod
     def execute_file():

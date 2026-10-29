@@ -77,6 +77,9 @@ class Consul:
         self.auto_refresh_thread = None
         self.run_auto_refresh_thread = False
 
+        # Wakes the session auto refresh thread, so that it can be stopped without waiting
+        self.auto_refresh_wakeup = threading.Event()
+
     @staticmethod
     def get_instance():
         """Static access method."""
@@ -91,6 +94,7 @@ class Consul:
         """
         logging.info("Starting the Consul session auto refresh thread")
         self.run_auto_refresh_thread = True
+        self.auto_refresh_wakeup.clear()
         self.auto_refresh_thread = threading.Thread(
             target=self.auto_refresh_sessions, args=()
         )
@@ -103,7 +107,7 @@ class Consul:
         while self.run_auto_refresh_thread:
             logging.debug("Refreshing active consul sessions from auto refresh thread")
             self.refresh_sessions()
-            time.sleep(5)
+            self.auto_refresh_wakeup.wait(5)
 
     def stop_session_auto_refresh_thread(self):
         """
@@ -111,6 +115,7 @@ class Consul:
         """
         logging.info("Stopping the Consul session auto refresh thread")
         self.run_auto_refresh_thread = False
+        self.auto_refresh_wakeup.set()
         if self.auto_refresh_thread is not None:
             self.auto_refresh_thread.join()
             self.auto_refresh_thread = None

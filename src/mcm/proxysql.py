@@ -67,6 +67,13 @@ class Proxysql:
             "WHERE variable_name='mysql-server_version'"
         )
 
+        # Hold queries for up to 20 seconds while there is no available server in their hostgroup,
+        # so that writes made during a failover wait for the new leader instead of failing
+        Proxysql.perform_sql_query(
+            "UPDATE global_variables SET variable_value='20000' "
+            "WHERE variable_name='mysql-connect_timeout_server_max'"
+        )
+
         # Setup Monitoring User
         replication_user = Utils.get_envvar_or_secret("MYSQL_REPLICATION_USER")
         replication_password = Utils.get_envvar_or_secret("MYSQL_REPLICATION_PASSWORD")
@@ -274,20 +281,22 @@ class Proxysql:
 
     def update_mysql_servers(self):
         """
-        Update the backend MySQL servers from Consul every few seconds
+        Update the backend MySQL servers from Consul every couple of seconds
         """
         while True:
             try:
+                # The leader is read before the node states, so that a newly promoted leader is
+                # seen with its state published before its promotion
                 consul = Consul.get_instance()
+                leader_ip = consul.get_replication_leader_ip()
                 self.update_mysql_server_if_needed(
-                    consul.get_registered_node_states(),
-                    consul.get_replication_leader_ip(),
+                    consul.get_registered_node_states(), leader_ip
                 )
             except (Exception, SystemExit):
                 # Failed queries exit through SystemExit, which must not end the thread
                 logging.exception("Unable to update the ProxySQL backend servers")
 
-            time.sleep(5)
+            time.sleep(2)
 
     @staticmethod
     def is_configured():

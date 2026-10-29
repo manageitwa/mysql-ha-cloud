@@ -183,7 +183,7 @@ class Mysql:
             Mysql.execute_query_as_root(
                 f"CHANGE REPLICATION SOURCE TO SOURCE_HOST = '{leader_ip}', "
                 f"SOURCE_PORT = 3306, "
-                "SOURCE_AUTO_POSITION = 1, GET_SOURCE_PUBLIC_KEY = 1, "
+                "SOURCE_AUTO_POSITION = 1, SOURCE_CONNECT_RETRY = 5, GET_SOURCE_PUBLIC_KEY = 1, "
                 f"SOURCE_SSL=1, SOURCE_SSL_CA = '{Utils.get_envvar('MYSQL_TLS_CA')}', "
                 f"SOURCE_SSL_CERT = '{Utils.get_envvar('MYSQL_TLS_CERT')}', "
                 f"SOURCE_SSL_KEY = '{Utils.get_envvar('MYSQL_TLS_KEY')}'",
@@ -193,7 +193,7 @@ class Mysql:
             Mysql.execute_query_as_root(
                 f"CHANGE REPLICATION SOURCE TO SOURCE_HOST = '{leader_ip}', "
                 f"SOURCE_PORT = 3306, "
-                "SOURCE_AUTO_POSITION = 1, GET_SOURCE_PUBLIC_KEY = 1",
+                "SOURCE_AUTO_POSITION = 1, SOURCE_CONNECT_RETRY = 5, GET_SOURCE_PUBLIC_KEY = 1",
                 discard_result=True,
             )
 
@@ -274,6 +274,16 @@ class Mysql:
         if io_running != "Yes" or sql_running != "Yes":
             io_error = status.get("Last_IO_Error", "")
             sql_error = status.get("Last_SQL_Error", "")
+
+            # MySQL retries the connection to the leader itself (every SOURCE_CONNECT_RETRY seconds),
+            # so only restart replication if a thread has stopped - restarting while it is
+            # connecting can block for several seconds
+            if io_running == "Connecting" and sql_running == "Yes":
+                logging.warning(
+                    "Replication is reconnecting to the leader (IO_Error='%s')", io_error
+                )
+                Mysql.set_replication_unhealthy_flag(True)
+                return False
 
             logging.warning(
                 "Replication is not healthy (IO_Running=%s, SQL_Running=%s, "

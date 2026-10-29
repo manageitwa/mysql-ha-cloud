@@ -146,6 +146,7 @@ class Actions:
         last_backup_check = None
         last_session_refresh = None
         last_replication_leader_check = None
+        last_replication_health_check = None
         last_proxysql_check = None
         proxysql_failure_count = 0
         max_proxysql_failures = 3
@@ -195,9 +196,10 @@ class Actions:
                         )
                         sys.exit(1)
 
-            # Try to replace a failed replication leader
+            # Try to replace a failed replication leader. Check every second, so that a missing
+            # leader is noticed, replaced and followed as quickly as possible.
             if Utils.is_refresh_needed(
-                last_replication_leader_check, timedelta(seconds=5)
+                last_replication_leader_check, timedelta(seconds=1)
             ):
                 last_replication_leader_check = datetime.now()
 
@@ -219,11 +221,22 @@ class Actions:
                         logging.warning("Replication leader is missing, starting failover")
                         leader_missing_since = datetime.now()
 
+                    # Check replication health as soon as a new leader is available, so that this
+                    # replica is marked unhealthy until it has caught up with the new leader
+                    last_replication_health_check = None
+
                     if not Snapshot.is_snapshotting and Actions.try_failover(
                         leader_missing_since
                     ):
                         replication_leader = True
+                elif not Utils.is_refresh_needed(
+                    last_replication_health_check, timedelta(seconds=5)
+                ):
+                    # Replication health is checked every 5 seconds
+                    pass
                 else:
+                    last_replication_health_check = datetime.now()
+
                     # Allow an unhealthy replica 60 seconds to restart before killing it off
                     replication_healthy = Mysql.is_replication_healthy()
 
@@ -312,6 +325,7 @@ class Actions:
         # are ignored after a while
         wait_expired = datetime.now() - leader_missing_since > timedelta(seconds=30)
         local_ip = Consul.getLocalIp()
+        most_recent = True
 
         for node_data in consul.get_registered_node_data():
             ip_address = node_data["ip_address"]
@@ -329,14 +343,24 @@ class Actions:
                     "Waiting for %s to publish executed transactions before failover",
                     ip_address,
                 )
-                return False
+                most_recent = False
+                break
 
             if not Mysql.is_gtid_subset(node_gtids, leader_gtids):
                 logging.info(
                     "Replica %s has received transactions that we have not, not promoting",
                     ip_address,
                 )
-                return False
+                most_recent = False
+                break
+
+        if not most_recent:
+            return False
+
+        # Stop serving queries while being promoted, so that ProxySQL does not send writes to this
+        # server before it is writable. This is published before becoming the leader, so that
+        # ProxySQL never sees this server as the leader and available until it is writable.
+        Mysql.set_replication_unhealthy_flag(True)
 
         if not consul.try_to_become_replication_leader():
             return False

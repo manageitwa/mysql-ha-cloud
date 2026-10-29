@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timedelta
-from typing import ClassVar
+from typing import ClassVar, Optional
 
 from mcm.consul import Consul
 from mcm.mysql import Mysql
@@ -19,8 +19,8 @@ from mcm.utils import Utils
 class Actions:
     """The actions of the application"""
 
-    consul_process: ClassVar[subprocess.Popen[bytes] | None] = None
-    mysql_process: ClassVar[subprocess.Popen[bytes] | None] = None
+    consul_process: ClassVar[Optional[subprocess.Popen[bytes]]] = None
+    mysql_process: ClassVar[Optional[subprocess.Popen[bytes]]] = None
 
     @staticmethod
     def join_or_bootstrap():

@@ -1,4 +1,4 @@
-ARG MYSQL_VERSION=8.4.12
+ARG MYSQL_VERSION=8.4.13
 
 # ---- Builder: compile Python dependencies only ----
 FROM mysql:${MYSQL_VERSION}-oracle AS pybuild

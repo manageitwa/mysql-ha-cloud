@@ -38,14 +38,14 @@ services:
       - ./cert/cert.pem:/cert/cert.pem:ro
       - ./cert/cert.key:/cert/cert.key:ro
 
-      - ./mysql_cluster_manager/src/mcm:/cluster/mcm
-      - ./mysql_cluster_manager/src/mysql_cluster_manager.py:/cluster/mysql_cluster_manager.py
+      - ./src/mcm:/cluster/mcm
+      - ./src/main.py:/cluster/main.py
       - ./entrypoint.sh:/cluster/entrypoint.sh
     tmpfs:
       - /tmp/consul
     stop_grace_period: 15s
     deploy:
-      replicas: 2
+      replicas: 4
       restart_policy:
         condition: on-failure
         delay: 30s

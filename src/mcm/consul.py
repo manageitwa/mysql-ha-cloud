@@ -37,6 +37,9 @@ class Consul:
     # Replication leader path
     replication_leader_path = kv_prefix + "replication_leader"
 
+    # The IP of this node, once found
+    local_ip = None
+
     def __init__(self):
         """
         Init the Consul client
@@ -888,6 +891,9 @@ class Consul:
 
         consul_args.append("-server")
 
+        consul_args.append("-retry-interval")
+        consul_args.append("5s")
+
         consul_args.append("-retry-join")
         consul_args.append(
             f"tasks.{Utils.get_envvar_or_secret('CONSUL_BOOTSTRAP_SERVICE', 'mysql')}"
@@ -917,21 +923,36 @@ class Consul:
         """
         Get the local IP, based on the service being bootstrapped
         """
-        ip_addresses = socket.gethostbyname_ex(
-            f"tasks.{Utils.get_envvar_or_secret('CONSUL_BOOTSTRAP_SERVICE', 'mysql')}"
-        )[2]
+        if Consul.local_ip is not None:
+            return Consul.local_ip
 
-        for interface in netifaces.interfaces():
-            if interface == "lo":
-                continue
+        # Docker only adds this node to the service DNS once it passes its health check, so allow a
+        # minute for it to appear
+        for _ in range(30):
+            try:
+                ip_addresses = socket.gethostbyname_ex(
+                    f"tasks.{Utils.get_envvar_or_secret('CONSUL_BOOTSTRAP_SERVICE', 'mysql')}"
+                )[2]
+            except socket.gaierror:
+                ip_addresses = []
 
-            for addressInfo in netifaces.ifaddresses(interface)[netifaces.AF_INET]:
-                if addressInfo["addr"] in ip_addresses:
-                    logging.debug(
-                        "Found local IP %s on interface %s",
-                        addressInfo["addr"],
-                        interface,
-                    )
-                    return addressInfo["addr"]
+            for interface in netifaces.interfaces():
+                if interface == "lo":
+                    continue
+
+                for addressInfo in netifaces.ifaddresses(interface).get(
+                    netifaces.AF_INET, []
+                ):
+                    if addressInfo["addr"] in ip_addresses:
+                        logging.debug(
+                            "Found local IP %s on interface %s",
+                            addressInfo["addr"],
+                            interface,
+                        )
+                        Consul.local_ip = addressInfo["addr"]
+                        return Consul.local_ip
+
+            logging.info("Waiting for this node to appear in the service DNS")
+            time.sleep(2)
 
         return None

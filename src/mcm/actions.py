@@ -28,8 +28,20 @@ class Actions:
         Join the existing cluster or bootstrap a new cluster
         """
 
+        # Start and configure ProxySQL first - its configuration does not depend on Consul or MySQL,
+        # so the node passes its health check quickly and can then route queries to the other nodes
+        # while it boots
+        Proxysql.start_proxysql()
+        Proxysql.inital_setup()
+
         # Start the local consul agent
         consul_process = Consul.agent_start()
+
+        # Keep the ProxySQL backend servers up to date with the cluster. The Consul connection is
+        # created first, as it is shared with the update thread.
+        Consul.get_instance()
+        proxysql = Proxysql()
+        proxysql.start_server_update_thread()
 
         # Check if we have an existing backup to restore
         # Use this backup if exists, or init a new MySQL database
@@ -89,9 +101,6 @@ class Actions:
         else:
             Mysql.restore_backup_or_exit()
 
-        # Start ProxySQL
-        Proxysql.start_proxysql()
-
         # Start MySQL
         mysql_process = Mysql.server_start()
 
@@ -99,9 +108,6 @@ class Actions:
         # changes made on a replica would be transactions that the other replicas do not have
         if replication_leader:
             Mysql.check_replication_user_privileges()
-
-        # Configure ProxySQL
-        Proxysql.inital_setup()
 
         # Get data from MySQL
         mysql_version = Mysql.execute_query_as_root("SELECT version()")[0]["version()"]
@@ -140,13 +146,14 @@ class Actions:
         last_backup_check = None
         last_session_refresh = None
         last_replication_leader_check = None
+        last_proxysql_check = None
+        proxysql_failure_count = 0
+        max_proxysql_failures = 3
         leader_missing_since = None
         replication_failure_count = 0
         max_replication_failures = 12
         replication_lag_count = 0
         max_replication_lag_checks = 36
-
-        proxysql = Proxysql()
 
         # Main Loop, heavy operations needs to be dispatched
         # to an extra thread. The loop needs to refresh the
@@ -172,16 +179,29 @@ class Actions:
                 )
                 sys.exit(1)
 
+            # ProxySQL is started as a daemon, so check that it is still running and configured
+            if Utils.is_refresh_needed(last_proxysql_check, timedelta(seconds=5)):
+                last_proxysql_check = datetime.now()
+
+                if Proxysql.is_configured():
+                    proxysql_failure_count = 0
+                else:
+                    proxysql_failure_count += 1
+
+                    if proxysql_failure_count >= max_proxysql_failures:
+                        logging.error(
+                            "ProxySQL has failed %d consecutive checks, exiting",
+                            proxysql_failure_count,
+                        )
+                        sys.exit(1)
+
             # Try to replace a failed replication leader
             if Utils.is_refresh_needed(
                 last_replication_leader_check, timedelta(seconds=5)
             ):
                 last_replication_leader_check = datetime.now()
 
-                # Update ProxySQL nodes
-                mysql_nodes = Consul.get_instance().get_registered_node_states()
                 leader_ip = Consul.get_instance().get_replication_leader_ip()
-                proxysql.update_mysql_server_if_needed(mysql_nodes, leader_ip)
 
                 replication_leader = Consul.get_instance().is_replication_leader()
 

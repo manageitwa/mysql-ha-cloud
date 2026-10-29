@@ -3,8 +3,13 @@
 import logging
 import os
 import subprocess
+import sys
+import threading
 import time
 
+import mysql.connector
+
+from mcm.consul import Consul
 from mcm.mysql import Mysql
 from mcm.utils import Utils
 
@@ -14,11 +19,15 @@ class Proxysql:
     This class encapsulates all ProxySQL related things
     """
 
+    # The configuration database, saved to disk by ProxySQL
+    database_file = "/var/lib/proxysql/proxysql.db"
+
     def __init__(self):
         """
         Init the instance
         """
         self.configured_mysql_servers = None
+        self.server_update_thread = None
 
     @staticmethod
     def inital_setup():
@@ -44,6 +53,9 @@ class Proxysql:
                 database="",
                 port=6032,
             )
+
+        # Persist the admin variables, so the password is kept if ProxySQL is restarted
+        Proxysql.perform_sql_query("SAVE ADMIN VARIABLES TO DISK")
 
         # Set up MySQL variables
         Proxysql.perform_sql_query(
@@ -92,6 +104,7 @@ class Proxysql:
         Proxysql.perform_sql_query("DELETE FROM mysql_replication_hostgroups")
 
         # Configure read write split
+        Proxysql.perform_sql_query("DELETE FROM mysql_query_rules")
         Proxysql.perform_sql_query(
             "INSERT INTO mysql_query_rules (active, match_digest, "
             "destination_hostgroup, apply) VALUES (1, '^SELECT.*', 2, 0)"
@@ -247,6 +260,66 @@ class Proxysql:
 
         return False
 
+    def start_server_update_thread(self):
+        """
+        Start the thread that keeps the backend MySQL servers up to date with the cluster. This
+        runs for the life of the node, including while it is still restoring and starting MySQL,
+        so that queries can be routed to the other nodes.
+        """
+        logging.info("Starting the ProxySQL server update thread")
+        self.server_update_thread = threading.Thread(
+            target=self.update_mysql_servers, args=(), daemon=True
+        )
+        self.server_update_thread.start()
+
+    def update_mysql_servers(self):
+        """
+        Update the backend MySQL servers from Consul every few seconds
+        """
+        while True:
+            try:
+                consul = Consul.get_instance()
+                self.update_mysql_server_if_needed(
+                    consul.get_registered_node_states(),
+                    consul.get_replication_leader_ip(),
+                )
+            except (Exception, SystemExit):
+                # Failed queries exit through SystemExit, which must not end the thread
+                logging.exception("Unable to update the ProxySQL backend servers")
+
+            time.sleep(5)
+
+    @staticmethod
+    def is_configured():
+        """
+        Check that ProxySQL is running and has the application user loaded, so it can accept
+        queries
+        """
+        cnx = None
+
+        try:
+            cnx = mysql.connector.connect(
+                user="admin",
+                password=Utils.get_envvar_or_secret("PROXYSQL_ADMIN_PASSWORD", "admin"),
+                port=6032,
+                connection_timeout=3,
+            )
+
+            cursor = cnx.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) FROM runtime_mysql_users WHERE username = %s",
+                (Utils.get_envvar_or_secret("MYSQL_USER"),),
+            )
+
+            # The ProxySQL admin interface returns all values as strings
+            return int(cursor.fetchone()[0]) > 0
+        except mysql.connector.Error as err:
+            logging.error("Unable to query ProxySQL: %s", err)
+            return False
+        finally:
+            if cnx:
+                cnx.close()
+
     @staticmethod
     def perform_sql_query(sql):
         """
@@ -266,14 +339,32 @@ class Proxysql:
         Start the ProxySQL
         """
 
+        # Start from a clean configuration, which inital_setup() then applies and saves to disk.
+        # --initial is not used for this, as ProxySQL's watchdog restarts a crashed ProxySQL with the
+        # same arguments, which would discard the saved configuration.
+        if os.path.exists(Proxysql.database_file):
+            os.remove(Proxysql.database_file)
+
         # Init proxysql
         proxysql_init = [
             "/usr/bin/proxysql",
             "--idle-threads",
             "-c",
             "/etc/proxysql.cnf",
-            "--initial",
         ]
         subprocess.run(proxysql_init, check=True)
 
-        return True
+        # ProxySQL starts as a daemon, so wait for the admin interface to be available. The initial
+        # admin credentials are used, as inital_setup() changes the password afterwards.
+        for _ in range(30):
+            try:
+                cnx = mysql.connector.connect(
+                    user="admin", password="admin", port=6032, connection_timeout=3
+                )
+                cnx.close()
+                return True
+            except mysql.connector.Error:
+                time.sleep(1)
+
+        logging.error("ProxySQL admin interface did not become available, exiting")
+        sys.exit(1)

@@ -53,6 +53,10 @@ class Actions:
     consul_leaderless_since: ClassVar[Optional[float]] = None
     consul_last_recovery: ClassVar[Optional[float]] = None
 
+    # The Consul servers that remained when Consul was last recovered, which a replica must be
+    # compared against before it is promoted. Cleared once there is a replication leader.
+    consul_recovered_servers: ClassVar[Optional[frozenset[str]]] = None
+
     # The Consul servers last seen as lost and remaining, and since when (monotonic clock)
     consul_recovery_view: ClassVar[Optional[tuple[frozenset[str], frozenset[str]]]] = None
     consul_recovery_view_since: ClassVar[Optional[float]] = None
@@ -247,6 +251,10 @@ class Actions:
         Actions.consul_leaderless_since = None
         Actions.consul_recovery_view = None
         Utils.clear_repeated_log("consul_recovery")
+
+        # Set before the agent restarts, so that failover cannot run in the new Consul cluster
+        # without waiting for the other remaining servers
+        Actions.consul_recovered_servers = frozenset(remaining)
         Actions.consul_restarting = True
 
         try:
@@ -598,6 +606,7 @@ class Actions:
                 # A leader is available, so any failover has finished
                 if leader_ip is not None:
                     leader_missing_since = None
+                    Actions.consul_recovered_servers = None
 
                     if Consul.get_instance().failover_gtids is not None:
                         Consul.get_instance().node_set_failover_gtids(None)
@@ -630,6 +639,69 @@ class Actions:
             time.sleep(1)
 
     @staticmethod
+    def wait_for_recovered_servers(registered_nodes, local_ip, leader_missing_since):
+        """
+        Check that the other servers that remained when Consul was recovered have registered again
+        and published their transactions. The Consul registry is empty after a recovery and the
+        servers register again at different times, so a replica could otherwise be promoted
+        without being compared against a server that has received more transactions.
+
+        A server is only waited for while it is still a task of the service. If its MySQL process
+        or Consul agent exits, its container exits, so its transactions are lost anyway. There is
+        no time limit, so that a server that is running but cannot register is never skipped
+        without an operator deciding to discard its transactions.
+        """
+        recovered_servers = Actions.consul_recovered_servers
+
+        if not recovered_servers:
+            return True
+
+        tasks = Consul.get_service_task_ips()
+
+        # A failed lookup does not list this node, and must not be mistaken for the other servers
+        # having stopped
+        if local_ip not in tasks:
+            Utils.log_repeated(
+                "failover_recovered_servers",
+                logging.WARNING,
+                "Unable to look up the tasks of the service, waiting before failover",
+            )
+            return False
+
+        published = {
+            node_data["ip_address"]
+            for node_data in registered_nodes
+            if node_data.get("failover_gtids") is not None
+            and Mysql.is_valid_gtid_set(node_data["failover_gtids"])
+        }
+        waiting = sorted((recovered_servers & set(tasks)) - published - {local_ip})
+
+        if not waiting:
+            Utils.clear_repeated_log("failover_recovered_servers")
+            return True
+
+        if datetime.now() - leader_missing_since > timedelta(seconds=60):
+            Utils.log_repeated(
+                "failover_recovered_servers",
+                logging.ERROR,
+                "Still waiting for %s to register in Consul and publish received transactions "
+                "before failover. No replication leader can be promoted until they do. Stopping "
+                "their containers lets failover continue, but discards any transactions only "
+                "they have received.",
+                waiting,
+            )
+        else:
+            Utils.log_repeated(
+                "failover_recovered_servers",
+                logging.INFO,
+                "Waiting for %s, which remained when Consul was recovered, to register and "
+                "publish received transactions before failover",
+                waiting,
+            )
+
+        return False
+
+    @staticmethod
     def try_failover(leader_missing_since, can_promote=True):
         """
         Try to become the new replication leader after the leader has gone offline. A replica is
@@ -652,13 +724,20 @@ class Actions:
             logging.info("Snapshot in progress, not promoting until it is finished")
             return False
 
+        local_ip = Consul.getLocalIp()
+        registered_nodes = consul.get_registered_node_data()
+
+        if not Actions.wait_for_recovered_servers(
+            registered_nodes, local_ip, leader_missing_since
+        ):
+            return False
+
         # Replicas that are stuck or snapshotting may never publish their transactions, so they
         # are ignored after a while
         wait_expired = datetime.now() - leader_missing_since > timedelta(seconds=30)
-        local_ip = Consul.getLocalIp()
         most_recent = True
 
-        for node_data in consul.get_registered_node_data():
+        for node_data in registered_nodes:
             ip_address = node_data["ip_address"]
 
             if ip_address == local_ip or node_data.get("restoring") is True:

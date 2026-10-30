@@ -31,16 +31,31 @@ class Actions:
     # can become the leader.
     fence_after: ClassVar[int] = Consul.session_ttl - 5
 
-    # Seconds the Consul cluster must have had no leader before recovering it
-    consul_recover_after: ClassVar[int] = 60
+    # Seconds between checks of whether the Consul cluster needs to be recovered
+    consul_recover_check_interval: ClassVar[int] = 2
 
-    # Seconds after recovering the Consul cluster before it can be recovered again
-    consul_recover_interval: ClassVar[int] = 300
+    # Seconds the Consul cluster must have had no leader before recovering it. This is longer than
+    # the session TTL, so a writable node that cannot renew its session has fenced itself before
+    # the cluster is recovered and another node can be promoted.
+    consul_recover_after: ClassVar[int] = Consul.session_ttl + 5
+
+    # Seconds the same Consul servers must have been seen as lost and remaining before recovering,
+    # so that a brief change in the service DNS is not mistaken for servers being lost. Swarm's
+    # restart delay means this has usually passed by the time the replacements have started.
+    consul_recover_stable_for: ClassVar[int] = 10
+
+    # Seconds after recovering the Consul cluster before it can be recovered again. This is longer
+    # than a recovery takes, so a Consul cluster that is still forming is not discarded.
+    consul_recover_interval: ClassVar[int] = 120
 
     # When the Consul cluster was first seen without a leader, and when it was last recovered
     # (monotonic clock)
     consul_leaderless_since: ClassVar[Optional[float]] = None
     consul_last_recovery: ClassVar[Optional[float]] = None
+
+    # The Consul servers last seen as lost and remaining, and since when (monotonic clock)
+    consul_recovery_view: ClassVar[Optional[tuple[frozenset[str], frozenset[str]]]] = None
+    consul_recovery_view_since: ClassVar[Optional[float]] = None
 
     # Whether the Consul agent is being restarted, so that its exit is expected
     consul_restarting: ClassVar[bool] = False
@@ -58,15 +73,20 @@ class Actions:
     @staticmethod
     def recover_consul_when_needed():
         """
-        Check every 10 seconds whether the Consul cluster needs to be recovered
+        Check regularly whether the Consul cluster needs to be recovered
         """
         while True:
             try:
                 Actions.recover_consul_if_needed()
             except Exception:
-                logging.exception("Unable to check whether Consul needs to be recovered")
+                Utils.log_repeated(
+                    "consul_recovery_check",
+                    logging.ERROR,
+                    "Unable to check whether Consul needs to be recovered",
+                    exc_info=True,
+                )
 
-            time.sleep(10)
+            time.sleep(Actions.consul_recover_check_interval)
 
     @staticmethod
     def get_other_running_mysql_servers():
@@ -111,16 +131,15 @@ class Actions:
 
         leaderless_for = now - Actions.consul_leaderless_since
 
-        if leaderless_for < Actions.consul_recover_after or (
-            Actions.consul_last_recovery is not None
-            and now - Actions.consul_last_recovery < Actions.consul_recover_interval
-        ):
-            return
-
         try:
             peers = set(consul.get_raft_peer_ips())
         except Exception:
-            logging.warning("Unable to read the Consul Raft configuration", exc_info=True)
+            Utils.log_repeated(
+                "consul_recovery",
+                logging.WARNING,
+                "Unable to read the Consul Raft configuration",
+                exc_info=True,
+            )
             return
 
         tasks = set(Consul.get_service_task_ips())
@@ -128,11 +147,20 @@ class Actions:
         lost = peers - tasks
         replacements = tasks - peers
 
+        # The servers are checked while waiting for the leader, so that they have usually been the
+        # same for long enough by the time recovery is allowed
+        view = (frozenset(lost), frozenset(remaining))
+
+        if view != Actions.consul_recovery_view:
+            Actions.consul_recovery_view = view
+            Actions.consul_recovery_view_since = now
+
+        if leaderless_for < Actions.consul_recover_after:
+            return
+
         if (
-            not lost
-            or len(remaining) > len(peers) // 2
-            or not replacements
-            or Consul.getLocalIp() not in remaining
+            Actions.consul_last_recovery is not None
+            and now - Actions.consul_last_recovery < Actions.consul_recover_interval
         ):
             Utils.log_repeated(
                 "consul_recovery",

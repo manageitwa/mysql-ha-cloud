@@ -214,7 +214,6 @@ class Actions:
                 elif leader_ip is None:
                     # The leader has gone offline, so replication cannot be healthy until a new leader
                     # is promoted. Do not count failures, and try to become the new leader instead.
-                    # Do not promote if currently snapshotting.
                     replication_failure_count = 0
                     replication_lag_count = 0
 
@@ -226,8 +225,11 @@ class Actions:
                     # replica is marked unhealthy until it has caught up with the new leader
                     last_replication_health_check = None
 
-                    if not Snapshot.is_snapshotting and Actions.try_failover(
-                        leader_missing_since
+                    # A snapshotting replica still publishes its transactions, so that the other
+                    # replicas wait for it if it has received transactions that they have not, but
+                    # it is not promoted until the snapshot is finished
+                    if Actions.try_failover(
+                        leader_missing_since, can_promote=not Snapshot.is_snapshotting
                     ):
                         replication_leader = True
                 elif not Utils.is_refresh_needed(
@@ -302,25 +304,27 @@ class Actions:
             time.sleep(1)
 
     @staticmethod
-    def try_failover(leader_missing_since):
+    def try_failover(leader_missing_since, can_promote=True):
         """
         Try to become the new replication leader after the leader has gone offline. A replica is
         only promoted once it has applied all transactions received from the old leader, and has
         every transaction from the old leader that the other replicas have, so that no
-        transactions are lost.
+        transactions are lost. If this replica cannot be promoted, its transactions are still
+        published for the other replicas to compare against.
         """
         consul = Consul.get_instance()
 
-        if not Mysql.has_applied_relay_log():
-            logging.info("Waiting for the relay log to be applied before failover")
-            return False
-
         # Publish the transactions received from the old leader so the other replicas can compare
-        # against them
+        # against them. Transactions that have not been applied yet are included, so that a replica
+        # that is behind on applying them is not mistaken for one that has not received them.
         leader_gtids = Mysql.get_leader_gtids()
 
         if consul.failover_gtids != leader_gtids:
             consul.node_set_failover_gtids(leader_gtids)
+
+        if not can_promote:
+            logging.info("Snapshot in progress, not promoting until it is finished")
+            return False
 
         # Replicas that are stuck or snapshotting may never publish their transactions, so they
         # are ignored after a while
@@ -349,7 +353,7 @@ class Actions:
                     continue
 
                 logging.info(
-                    "Waiting for %s to publish executed transactions before failover",
+                    "Waiting for %s to publish received transactions before failover",
                     ip_address,
                 )
                 most_recent = False
@@ -364,6 +368,12 @@ class Actions:
                 break
 
         if not most_recent:
+            return False
+
+        # The relay log is discarded when this replica is promoted, so every received transaction
+        # must be applied first
+        if not Mysql.has_applied_relay_log():
+            logging.info("Waiting for received transactions to be applied before failover")
             return False
 
         # Stop serving queries while being promoted, so that ProxySQL does not send writes to this

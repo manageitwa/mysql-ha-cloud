@@ -374,28 +374,30 @@ class Mysql:
     @staticmethod
     def has_applied_relay_log():
         """
-        Check that all transactions received from the replication leader have been applied
+        Check that all transactions received from the replication leader have been applied. The
+        received and executed transactions are compared, as the SQL thread reports that it has read
+        all of the relay log while parallel workers may still be applying transactions. A
+        transaction that has only partly been received is not included in the received
+        transactions, so it does not prevent this from passing if the leader has gone.
         """
-        slave_status = Mysql.execute_query_as_root("SHOW REPLICA STATUS")
+        status = Mysql.execute_query_as_root(
+            "SELECT GTID_SUBSET(RECEIVED_TRANSACTION_SET, @@GLOBAL.gtid_executed) AS applied "
+            "FROM performance_schema.replication_connection_status"
+        )
 
         # Replication is not configured, so there is nothing to apply
-        if len(slave_status) != 1:
+        if len(status) != 1:
             return True
 
-        status = slave_status[0]
-
-        return (
-            status.get("Replica_SQL_Running") == "Yes"
-            and status.get("Replica_SQL_Running_State")
-            == "Replica has read all relay log; waiting for more updates"
-        )
+        return status[0]["applied"] == 1
 
     @staticmethod
     def get_leader_gtids():
         """
-        Get the set of transactions executed on this replica that were received from its
-        replication leader. Transactions from other servers are excluded, as replicas may have
-        executed transactions locally or inherited them from a snapshot of another replica.
+        Get the set of transactions on this replica that were received from its replication
+        leader, whether or not they have been applied yet. Transactions from other servers are
+        excluded, as replicas may have executed transactions locally or inherited them from a
+        snapshot of another replica.
         """
         slave_status = Mysql.execute_query_as_root("SHOW REPLICA STATUS")
 
@@ -405,8 +407,10 @@ class Mysql:
         all_leader_gtids = f"{slave_status[0]['Source_UUID']}:1-9223372036854775806"
 
         return Mysql.execute_query_as_root(
-            "SELECT GTID_SUBTRACT(@@GLOBAL.gtid_executed, "
-            "GTID_SUBTRACT(@@GLOBAL.gtid_executed, %s)) AS gtids",
+            "SELECT GTID_SUBTRACT(t.gtids, GTID_SUBTRACT(t.gtids, %s)) AS gtids FROM ("
+            "SELECT CONCAT_WS(',', NULLIF(@@GLOBAL.gtid_executed, ''), "
+            "NULLIF(RECEIVED_TRANSACTION_SET, '')) AS gtids "
+            "FROM performance_schema.replication_connection_status) t",
             params=(all_leader_gtids,),
         )[0]["gtids"]
 

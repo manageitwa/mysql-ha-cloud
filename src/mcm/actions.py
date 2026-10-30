@@ -100,6 +100,8 @@ class Actions:
 
         if consul.has_leader() is not False:
             Actions.consul_leaderless_since = None
+            Actions.consul_recovery_view = None
+            Utils.clear_repeated_log("consul_recovery")
             return
 
         now = time.monotonic()
@@ -132,12 +134,76 @@ class Actions:
             or not replacements
             or Consul.getLocalIp() not in remaining
         ):
-            logging.warning(
-                "Consul has had no leader for %d seconds, but cannot be recovered automatically "
-                "(Consul servers %s, running tasks %s)",
+            Utils.log_repeated(
+                "consul_recovery",
+                logging.WARNING,
+                "Consul has had no leader for %d seconds since it was recovered, waiting before "
+                "recovering it again",
+                leaderless_for,
+            )
+            return
+
+        # Before the agent has joined a Consul cluster, such as in a cold start, it has no servers
+        if not peers:
+            Utils.log_repeated(
+                "consul_recovery",
+                logging.INFO,
+                "Waiting for the Consul cluster to form",
+            )
+            return
+
+        if not lost:
+            Utils.log_repeated(
+                "consul_recovery",
+                logging.ERROR,
+                "Consul has had no leader for %d seconds, but all of its servers (%s) are still "
+                "running according to Swarm. They may be unreachable, such as in a network "
+                "partition, so Consul is not recovered automatically.",
                 leaderless_for,
                 sorted(peers),
-                sorted(tasks),
+            )
+            return
+
+        if len(remaining) > len(peers) // 2:
+            Utils.log_repeated(
+                "consul_recovery",
+                logging.WARNING,
+                "Consul has had no leader for %d seconds, but a majority of its servers (%s of "
+                "%s) are still running, so it should elect a leader without being recovered",
+                leaderless_for,
+                sorted(remaining),
+                sorted(peers),
+            )
+            return
+
+        if Consul.getLocalIp() not in remaining:
+            Utils.log_repeated(
+                "consul_recovery",
+                logging.INFO,
+                "Consul has lost the majority of its servers, waiting for the remaining servers "
+                "(%s) to recover it",
+                sorted(remaining),
+            )
+            return
+
+        if not replacements:
+            Utils.log_repeated(
+                "consul_recovery",
+                logging.INFO,
+                "Consul has lost the majority of its servers (%s are no longer running), waiting "
+                "for Swarm to replace them before recovering",
+                sorted(lost),
+            )
+            return
+
+        if now - Actions.consul_recovery_view_since < Actions.consul_recover_stable_for:
+            Utils.log_repeated(
+                "consul_recovery",
+                logging.INFO,
+                "Consul has lost the majority of its servers (%s are no longer running), "
+                "recovering once this has not changed for %d seconds",
+                sorted(lost),
+                Actions.consul_recover_stable_for,
             )
             return
 
@@ -151,6 +217,8 @@ class Actions:
 
         Actions.consul_last_recovery = now
         Actions.consul_leaderless_since = None
+        Actions.consul_recovery_view = None
+        Utils.clear_repeated_log("consul_recovery")
         Actions.consul_restarting = True
 
         try:

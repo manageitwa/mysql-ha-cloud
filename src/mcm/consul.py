@@ -411,8 +411,14 @@ class Consul:
         # Without a session, the leader key would be written without a lock, so it would never be
         # released and no node could become the leader
         if self.node_health_session is None:
-            logging.warning("No Consul session, unable to become replication leader")
+            Utils.log_repeated(
+                "replication_leader_session",
+                logging.WARNING,
+                "No Consul session, unable to become replication leader",
+            )
             return False
+
+        Utils.clear_repeated_log("replication_leader_session")
 
         # Allow 3 minutes of retries
         for _ in range(36):

@@ -1,6 +1,8 @@
 """This file contains the utils of the cluster manager"""
 
+import logging
 import os
+import time
 
 from datetime import datetime
 
@@ -8,6 +10,10 @@ class Utils:
     """
     Utilities for the project
     """
+
+    # The message last logged for each repeated condition, and when it was logged (monotonic clock)
+    __repeated_logs = {}
+
     @staticmethod
     def get_envvar(name, default = None):
         """
@@ -55,3 +61,26 @@ class Utils:
             last_execution = datetime.fromtimestamp(last_execution)
 
         return datetime.now() - last_execution > max_timedelta
+
+    @staticmethod
+    def log_repeated(key, level, message, *args, interval = 60, **kwargs):
+        """
+        Log a message about a condition that is checked repeatedly. It is only logged when the
+        message for the condition changes, or as a reminder once every interval seconds, so that a
+        condition that lasts does not flood the logs.
+        """
+        now = time.monotonic()
+        last = Utils.__repeated_logs.get(key)
+
+        if last is not None and last[0] == message and now - last[1] < interval:
+            return
+
+        Utils.__repeated_logs[key] = (message, now)
+        logging.log(level, message, *args, **kwargs)
+
+    @staticmethod
+    def clear_repeated_log(key):
+        """
+        Mark a repeated condition as over, so that it is logged straight away if it happens again
+        """
+        Utils.__repeated_logs.pop(key, None)

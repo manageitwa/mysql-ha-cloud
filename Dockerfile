@@ -32,10 +32,14 @@ RUN \
         rsync \
         unzip \
         wget && \
-    # Install Percona XtraBackup
+    # Install Percona XtraBackup, verifying that it is signed with Percona's packaging key. The key's
+    # fingerprint is pinned, and _pkgverify_level makes rpm reject an unsigned package.
+    wget https://repo.percona.com/yum/PERCONA-PACKAGING-KEY -O /tmp/percona.asc && \
+    gpg --show-keys --with-colons /tmp/percona.asc | grep -q "^fpr:::::::::4D1BB29D63D98E422B2113B19334A25F8507EFA5:$" && \
+    rpm --import /tmp/percona.asc && \
     wget https://downloads.percona.com/downloads/Percona-XtraBackup-8.4/Percona-XtraBackup-8.4.0-7/binary/redhat/9/x86_64/percona-xtrabackup-84-8.4.0-7.1.el9.x86_64.rpm -O /tmp/xtrabackup.rpm && \
-    rpm -i /tmp/xtrabackup.rpm && \
-    rm /tmp/xtrabackup.rpm && \
+    rpm -i --define "_pkgverify_level all" /tmp/xtrabackup.rpm && \
+    rm /tmp/xtrabackup.rpm /tmp/percona.asc && \
     # Install Consul CLI
     wget https://releases.hashicorp.com/consul/1.22.7/consul_1.22.7_linux_amd64.zip -O /tmp/consul.zip && \
     echo "fe25cecd8dd3552a8e5b0941cde1d79bb6004eac384aa45679dd1398f947201d /tmp/consul.zip" | sha256sum -c && \

@@ -155,11 +155,14 @@ class Mysql:
             outfile.write(f"ssl_cert={Utils.get_envvar('MYSQL_TLS_CERT')}\n")
             outfile.write(f"ssl_key={Utils.get_envvar('MYSQL_TLS_KEY')}\n")
 
-        if (
-            Utils.get_envvar_or_secret("MYSQL_TLS_REQUIRED", "True").lower() == "true"
-            or Utils.get_envvar_or_secret("MYSQL_TLS_REQUIRED", "True") == "1"
-        ):
-            outfile.write("require_secure_transport=ON\n")
+            # TLS is only enforced when the certificates are configured, as replication and ProxySQL
+            # only use TLS when they are
+            if (
+                Utils.get_envvar_or_secret("MYSQL_TLS_REQUIRED", "True").lower()
+                == "true"
+                or Utils.get_envvar_or_secret("MYSQL_TLS_REQUIRED", "True") == "1"
+            ):
+                outfile.write("require_secure_transport=ON\n")
 
         outfile.close()
 

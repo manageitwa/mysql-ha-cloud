@@ -5,6 +5,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timedelta
 from typing import ClassVar, Optional
@@ -21,6 +22,14 @@ class Actions:
 
     consul_process: ClassVar[Optional[subprocess.Popen[bytes]]] = None
     mysql_process: ClassVar[Optional[subprocess.Popen[bytes]]] = None
+
+    # Whether MySQL has been set to read-only because the Consul session could not be renewed
+    fenced: ClassVar[bool] = False
+
+    # Seconds without a session renewal before a writable node is fenced. This is less than the
+    # session TTL, so the node is read-only before the session can be invalidated and another node
+    # can become the leader.
+    fence_after: ClassVar[int] = Consul.session_ttl - 5
 
     @staticmethod
     def join_or_bootstrap():
@@ -136,7 +145,68 @@ class Actions:
         # Run the main event loop
         Actions.consul_process = consul_process
         Actions.mysql_process = mysql_process
+        Consul.get_instance().start_session_keepalive_thread()
+        Actions.start_fencing_thread()
         Actions.join_main_event_loop()
+
+    @staticmethod
+    def start_fencing_thread():
+        """
+        Start the thread that sets MySQL to read-only if the Consul session cannot be renewed. It runs
+        separately from the main event loop, so that it still runs if the main loop is waiting on
+        Consul.
+        """
+        logging.info("Starting the fencing thread")
+        threading.Thread(target=Actions.fence_when_needed, args=(), daemon=True).start()
+
+    @staticmethod
+    def fence_when_needed():
+        """
+        Check every second whether MySQL needs to be fenced or unfenced
+        """
+        while True:
+            try:
+                Actions.check_fencing()
+            except Exception:
+                logging.exception("Unable to check fencing")
+
+            time.sleep(1)
+
+    @staticmethod
+    def check_fencing():
+        """
+        Set a writable MySQL server to read-only if the Consul session has not been renewed
+        recently. The session may then be invalidated and another node promoted, and two writable
+        servers would let the data diverge. Writes are allowed again once the session is renewed, if
+        this node is still the replication leader.
+        """
+        consul = Consul.get_instance()
+        renewed_ago = time.monotonic() - consul.last_session_renewal
+
+        if renewed_ago > Actions.fence_after:
+            if not Actions.fenced and Mysql.is_writable():
+                logging.error(
+                    "Consul session has not been renewed for %d seconds, setting MySQL to "
+                    "read-only to prevent another leader accepting writes at the same time",
+                    renewed_ago,
+                )
+                Mysql.set_read_only(True)
+                Actions.fenced = True
+        elif Actions.fenced:
+            # If this node is no longer the leader, the main event loop makes it a replica
+            if consul.holds_replication_leader_lock():
+                logging.warning(
+                    "Consul session renewed and still the replication leader, setting MySQL "
+                    "to read-write"
+                )
+                Mysql.set_read_only(False)
+            else:
+                logging.warning(
+                    "Consul session renewed but no longer the replication leader, keeping MySQL "
+                    "read-only"
+                )
+
+            Actions.fenced = False
 
     @staticmethod
     def join_main_event_loop():

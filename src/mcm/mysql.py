@@ -236,6 +236,30 @@ class Mysql:
         Mysql.execute_query_as_root("SET GLOBAL read_only = 0", discard_result=True)
 
     @staticmethod
+    def is_writable():
+        """
+        Check if the local MySQL server accepts writes
+        """
+        return Mysql.execute_query_as_root("SELECT @@GLOBAL.read_only AS ro")[0]["ro"] == 0
+
+    @staticmethod
+    def set_read_only(read_only):
+        """
+        Set the local MySQL server to read-only or read-write. super_read_only also stops users with
+        administrative privileges from writing.
+        """
+        if read_only:
+            Mysql.execute_query_as_root("SET GLOBAL read_only = 1", discard_result=True)
+            Mysql.execute_query_as_root(
+                "SET GLOBAL super_read_only = 1", discard_result=True
+            )
+        else:
+            Mysql.execute_query_as_root(
+                "SET GLOBAL super_read_only = 0", discard_result=True
+            )
+            Mysql.execute_query_as_root("SET GLOBAL read_only = 0", discard_result=True)
+
+    @staticmethod
     def get_replication_leader_ip():
         """
         Get the current replication leader ip

@@ -56,6 +56,14 @@ class Consul:
     gossip_key = None
     acl_token = None
 
+    # The TTL of the node health session, in seconds. As the session has no health checks, Consul
+    # does not invalidate it, and so release the replication leader lock, until at least this long
+    # after it was last renewed.
+    session_ttl = 15
+
+    # Timeout for requests to the Consul agent, in seconds, so that a hung agent does not block
+    request_timeout = 5
+
     def __init__(self):
         """
         Init the Consul client
@@ -71,7 +79,9 @@ class Consul:
         # Allow 30 seconds for Consul agent to start
         for _ in range(6):
             try:
-                self.client = pyconsul.Consul(token=acl_token)
+                self.client = pyconsul.Consul(
+                    token=acl_token, connections_timeout=Consul.request_timeout
+                )
             except:
                 logging.warning("Unable to connect to Consul, retrying in 5 seconds")
                 time.sleep(5)
@@ -81,6 +91,10 @@ class Consul:
             raise Exception("Unable to establish a connection with Consul")
 
         self.node_health_session = None
+
+        # When the node health session was last created or renewed (monotonic clock)
+        self.last_session_renewal = None
+
         self.create_node_health_session()
         self.mysql_version = None
         self.server_id = None
@@ -127,6 +141,30 @@ class Consul:
             self.refresh_sessions()
             self.auto_refresh_wakeup.wait(5)
 
+    def start_session_keepalive_thread(self):
+        """
+        Start the thread that renews the node health session every couple of seconds for the life
+        of the node. This runs separately from the main event loop, which can be held up by other
+        requests to Consul, so that the session is renewed as soon as Consul is available again.
+        """
+        logging.info("Starting the Consul session keepalive thread")
+        threading.Thread(target=self.keep_session_alive, args=(), daemon=True).start()
+
+    def keep_session_alive(self):
+        """
+        Renew the node health session every couple of seconds. Each attempt is made once, as
+        refresh_sessions() recreates the session if it cannot be renewed.
+        """
+        while True:
+            try:
+                if self.node_health_session is not None:
+                    self.client.session.renew(self.node_health_session)
+                    self.last_session_renewal = time.monotonic()
+            except Exception:
+                logging.debug("Unable to renew session %s", self.node_health_session)
+
+            time.sleep(2)
+
     def stop_session_auto_refresh_thread(self):
         """
         Stop the session auto refresh thread
@@ -151,12 +189,18 @@ class Consul:
         # Allow 30 seconds for session to be created
         for _ in range(6):
             try:
+                # No health checks are attached, so the session is only invalidated by its TTL.
+                # By default, the session would also be invalidated as soon as the Consul agents
+                # mark this node as failed, which can happen before this node has noticed that it
+                # cannot renew the session and fenced itself.
                 self.node_health_session = self.client.session.create(
                     name=Consul.instances_session_key,
                     behavior="delete",
-                    ttl=15,
+                    ttl=Consul.session_ttl,
                     lock_delay=0,
+                    checks=[],
                 )
+                self.last_session_renewal = time.monotonic()
 
                 return self.node_health_session
             except:
@@ -325,6 +369,22 @@ class Consul:
                 time.sleep(5)
 
         raise Exception("Unable to determine server id")
+
+    def holds_replication_leader_lock(self):
+        """
+        Check once if this node holds the replication leader lock, without retrying. Returns False
+        if Consul cannot be reached.
+        """
+        try:
+            result = self.client.kv.get(Consul.replication_leader_path)
+        except Exception:
+            return False
+
+        return (
+            result[1] is not None
+            and self.node_health_session is not None
+            and result[1].get("Session") == self.node_health_session
+        )
 
     def is_replication_leader(self):
         """
@@ -913,6 +973,7 @@ class Consul:
         for _ in range(7):
             try:
                 self.client.session.renew(self.node_health_session)
+                self.last_session_renewal = time.monotonic()
                 return True
             except:
                 logging.warning(

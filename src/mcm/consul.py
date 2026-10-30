@@ -1,12 +1,16 @@
 """This file is part of the MySQL cluster manager"""
 
+import base64
+import hashlib
 import json
 import logging
+import os
 import socket
 import subprocess
 import sys
 import threading
 import time
+import uuid
 
 import consul as pyconsul
 import netifaces
@@ -40,6 +44,17 @@ class Consul:
     # The IP of this node, once found
     local_ip = None
 
+    # Agent data directory
+    data_dir = "/tmp/consul"
+
+    # Agent configuration file. Kept in the data directory, as it contains secrets and the data
+    # directory is expected to be a tmpfs mount.
+    config_file = data_dir + "/mcm.json"
+
+    # The gossip encryption key and ACL token, once determined
+    gossip_key = None
+    acl_token = None
+
     def __init__(self):
         """
         Init the Consul client
@@ -50,10 +65,12 @@ class Consul:
         Consul.__instance = self
         logging.info("Register Consul connection")
 
+        acl_token = Consul.get_acl_token()
+
         # Allow 30 seconds for Consul agent to start
         for _ in range(6):
             try:
-                self.client = pyconsul.Consul()
+                self.client = pyconsul.Consul(token=acl_token)
             except:
                 logging.warning("Unable to connect to Consul, retrying in 5 seconds")
                 time.sleep(5)
@@ -882,17 +899,31 @@ class Consul:
             )
             sys.exit(1)
 
+        ui_enabled = (
+            Utils.get_envvar_or_secret("CONSUL_ENABLE_UI", "false").lower() == "true"
+            or Utils.get_envvar_or_secret("CONSUL_ENABLE_UI", "false") == "1"
+        )
+
+        Consul.write_agent_config()
+
         logging.info("Starting Consul Agent")
         consul_args = ["consul"]
         consul_args.append("agent")
         consul_args.append("-data-dir")
-        consul_args.append("/tmp/consul")
+        consul_args.append(Consul.data_dir)
 
+        consul_args.append("-config-file")
+        consul_args.append(Consul.config_file)
+
+        # Gossip and server RPC use the bind address, so the cluster still communicates over the
+        # overlay network
         consul_args.append("-bind")
         consul_args.append(Consul.getLocalIp())
 
+        # The HTTP API is only used locally, so it is only made available to other hosts if the UI
+        # is enabled
         consul_args.append("-client")
-        consul_args.append("0.0.0.0")
+        consul_args.append("0.0.0.0" if ui_enabled else "127.0.0.1")
 
         consul_args.append("-server")
 
@@ -907,10 +938,7 @@ class Consul:
         consul_args.append("-bootstrap-expect")
         consul_args.append(Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_EXPECT", "3"))
 
-        if (
-            Utils.get_envvar_or_secret("CONSUL_ENABLE_UI", "false").lower() == "true"
-            or Utils.get_envvar_or_secret("CONSUL_ENABLE_UI", "false") == "1"
-        ):
+        if ui_enabled:
             consul_args.append("-ui")
 
         logging.info("Consul args: %s", consul_args)
@@ -922,6 +950,98 @@ class Consul:
         time.sleep(1)
 
         return consul_process
+
+    @staticmethod
+    def write_agent_config():
+        """
+        Write the agent configuration file, enabling gossip encryption and ACLs. Secrets are kept
+        out of the agent arguments, as these are logged and visible in the process list.
+        """
+        acl_token = Consul.get_acl_token()
+
+        config = {
+            "encrypt": Consul.get_gossip_key(),
+            "encrypt_verify_incoming": True,
+            "encrypt_verify_outgoing": True,
+            "acl": {
+                "enabled": True,
+                "default_policy": "deny",
+                "down_policy": "extend-cache",
+                "tokens": {
+                    "initial_management": acl_token,
+                    "agent": acl_token,
+                },
+            },
+        }
+
+        os.makedirs(Consul.data_dir, exist_ok=True)
+        fd = os.open(Consul.config_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w") as outfile:
+            json.dump(config, outfile)
+
+    @staticmethod
+    def derive_secret(purpose, length):
+        """
+        Derive a secret for Consul from the MySQL root password, which is shared by all nodes. Used
+        when a secret is not explicitly provided.
+        """
+        return hashlib.pbkdf2_hmac(
+            "sha256",
+            Utils.get_envvar_or_secret("MYSQL_ROOT_PASSWORD").encode(),
+            f"mysql-ha-cloud/consul/{purpose}".encode(),
+            600000,
+            dklen=length,
+        )
+
+    @staticmethod
+    def get_gossip_key():
+        """
+        Get the gossip encryption key from CONSUL_GOSSIP_KEY, or derive one if not provided
+        """
+        if Consul.gossip_key is not None:
+            return Consul.gossip_key
+
+        gossip_key = Utils.get_envvar_or_secret("CONSUL_GOSSIP_KEY", "")
+
+        if gossip_key == "":
+            gossip_key = base64.b64encode(Consul.derive_secret("gossip", 32)).decode()
+        else:
+            try:
+                valid = len(base64.b64decode(gossip_key, validate=True)) in (16, 24, 32)
+            except ValueError:
+                valid = False
+
+            if not valid:
+                logging.error(
+                    "CONSUL_GOSSIP_KEY must be a base64 encoded 16, 24 or 32 byte key, such as one generated by \"consul keygen\""
+                )
+                sys.exit(1)
+
+        Consul.gossip_key = gossip_key
+        return Consul.gossip_key
+
+    @staticmethod
+    def get_acl_token():
+        """
+        Get the ACL management token from CONSUL_ACL_TOKEN, or derive one if not provided
+        """
+        if Consul.acl_token is not None:
+            return Consul.acl_token
+
+        acl_token = Utils.get_envvar_or_secret("CONSUL_ACL_TOKEN", "")
+
+        if acl_token == "":
+            acl_token = str(uuid.UUID(bytes=Consul.derive_secret("acl", 16), version=4))
+        else:
+            try:
+                acl_token = str(uuid.UUID(acl_token))
+            except ValueError:
+                logging.error("CONSUL_ACL_TOKEN must be a UUID")
+                sys.exit(1)
+
+        Consul.acl_token = acl_token
+        return Consul.acl_token
 
     @staticmethod
     def getLocalIp():

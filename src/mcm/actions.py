@@ -450,7 +450,10 @@ class Actions:
 
         # Leave cluster and stop the consul agent
         if Actions.consul_process is not None:
-            subprocess.run(["consul", "leave"])
+            subprocess.run(
+                ["consul", "leave"],
+                env={**os.environ, "CONSUL_HTTP_TOKEN": Consul.get_acl_token()},
+            )
 
             Actions.consul_process.terminate()
 

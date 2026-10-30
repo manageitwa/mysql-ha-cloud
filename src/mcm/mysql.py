@@ -50,9 +50,11 @@ class Mysql:
         application_user = Utils.get_envvar_or_secret("MYSQL_USER")
         appication_password = Utils.get_envvar_or_secret("MYSQL_PASSWORD")
 
+        # Values are passed as parameters so that they are escaped. The host is also passed as a
+        # parameter, as the connector does not unescape %% in statements with parameters.
         Mysql.execute_statement_or_exit(
-            f"CREATE USER '{application_user}'@'%' "
-            f"IDENTIFIED WITH caching_sha2_password BY '{appication_password}'"
+            "CREATE USER %s@%s IDENTIFIED WITH caching_sha2_password BY %s",
+            params=(application_user, "%", appication_password),
         )
 
         # Create backup user
@@ -60,24 +62,25 @@ class Mysql:
         backup_user = Utils.get_envvar_or_secret("MYSQL_BACKUP_USER")
         backup_password = Utils.get_envvar_or_secret("MYSQL_BACKUP_PASSWORD")
         Mysql.execute_statement_or_exit(
-            f"CREATE USER '{backup_user}'@'localhost' "
-            f"IDENTIFIED WITH caching_sha2_password BY '{backup_password}'"
+            "CREATE USER %s@'localhost' IDENTIFIED WITH caching_sha2_password BY %s",
+            params=(backup_user, backup_password),
         )
         Mysql.execute_statement_or_exit(
             "GRANT BACKUP_ADMIN, PROCESS, RELOAD, LOCK TABLES, REPLICATION CLIENT, REPLICATION_SLAVE_ADMIN, "
-            f"REPLICATION CLIENT ON *.* TO '{backup_user}'@'localhost'"
+            "REPLICATION CLIENT ON *.* TO %s@'localhost'",
+            params=(backup_user,),
         )
         Mysql.execute_statement_or_exit(
-            "GRANT SELECT ON performance_schema.log_status TO "
-            f"'{backup_user}'@'localhost'"
+            "GRANT SELECT ON performance_schema.log_status TO %s@'localhost'",
+            params=(backup_user,),
         )
         Mysql.execute_statement_or_exit(
-            "GRANT SELECT ON performance_schema.keyring_component_status TO "
-            f"'{backup_user}'@'localhost'"
+            "GRANT SELECT ON performance_schema.keyring_component_status TO %s@'localhost'",
+            params=(backup_user,),
         )
         Mysql.execute_statement_or_exit(
-            "GRANT SELECT ON performance_schema.replication_group_members TO "
-            f"'{backup_user}'@'localhost'"
+            "GRANT SELECT ON performance_schema.replication_group_members TO %s@'localhost'",
+            params=(backup_user,),
         )
 
         # Create replication user
@@ -85,38 +88,43 @@ class Mysql:
         replication_user = Utils.get_envvar_or_secret("MYSQL_REPLICATION_USER")
         replication_password = Utils.get_envvar_or_secret("MYSQL_REPLICATION_PASSWORD")
         Mysql.execute_statement_or_exit(
-            f"CREATE USER '{replication_user}'@'%' "
-            f"IDENTIFIED WITH caching_sha2_password BY '{replication_password}'"
+            "CREATE USER %s@%s IDENTIFIED WITH caching_sha2_password BY %s",
+            params=(replication_user, "%", replication_password),
         )
         Mysql.execute_statement_or_exit(
-            f"GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '{replication_user}'@'%'"
+            "GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO %s@%s",
+            params=(replication_user, "%"),
         )
 
         # Change permissions for the root user
         logging.debug("Set permissions for the root user")
         root_password = Utils.get_envvar_or_secret("MYSQL_ROOT_PASSWORD")
         Mysql.execute_statement_or_exit(
-            f"CREATE USER 'root'@'%' IDENTIFIED WITH caching_sha2_password BY '{root_password}'"
+            "CREATE USER 'root'@%s IDENTIFIED WITH caching_sha2_password BY %s",
+            params=("%", root_password),
         )
         Mysql.execute_statement_or_exit(
             "GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION"
         )
         Mysql.execute_statement_or_exit(
-            "ALTER USER 'root'@'localhost' "
-            f"IDENTIFIED WITH caching_sha2_password BY '{root_password}'"
+            "ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY %s",
+            params=(root_password,),
         )
 
         # Create database if specified
         if Utils.get_envvar_or_secret("MYSQL_DATABASE"):
-            database_name = Utils.get_envvar_or_secret("MYSQL_DATABASE")
+            database_name = Mysql.quote_identifier(
+                Utils.get_envvar_or_secret("MYSQL_DATABASE")
+            )
             logging.debug("Setting up initial database")
             Mysql.execute_statement_or_exit(
-                sql=f"CREATE DATABASE IF NOT EXISTS `{database_name}`",
+                sql=f"CREATE DATABASE IF NOT EXISTS {database_name}",
                 username="root",
                 password=root_password,
             )
             Mysql.execute_statement_or_exit(
-                sql=f"GRANT ALL PRIVILEGES ON `{database_name}`.* TO '{application_user}'@'%'",
+                sql=f"GRANT ALL PRIVILEGES ON {database_name}.* TO %s@%s",
+                params=(application_user, "%"),
                 username="root",
                 password=root_password,
             )
@@ -181,26 +189,31 @@ class Mysql:
             and Utils.get_envvar("MYSQL_TLS_KEY", False)
         ):
             Mysql.execute_query_as_root(
-                f"CHANGE REPLICATION SOURCE TO SOURCE_HOST = '{leader_ip}', "
-                f"SOURCE_PORT = 3306, "
+                "CHANGE REPLICATION SOURCE TO SOURCE_HOST = %s, "
+                "SOURCE_PORT = 3306, "
                 "SOURCE_AUTO_POSITION = 1, SOURCE_CONNECT_RETRY = 5, GET_SOURCE_PUBLIC_KEY = 1, "
-                f"SOURCE_SSL=1, SOURCE_SSL_CA = '{Utils.get_envvar('MYSQL_TLS_CA')}', "
-                f"SOURCE_SSL_CERT = '{Utils.get_envvar('MYSQL_TLS_CERT')}', "
-                f"SOURCE_SSL_KEY = '{Utils.get_envvar('MYSQL_TLS_KEY')}'",
+                "SOURCE_SSL=1, SOURCE_SSL_CA = %s, SOURCE_SSL_CERT = %s, SOURCE_SSL_KEY = %s",
                 discard_result=True,
+                params=(
+                    leader_ip,
+                    Utils.get_envvar("MYSQL_TLS_CA"),
+                    Utils.get_envvar("MYSQL_TLS_CERT"),
+                    Utils.get_envvar("MYSQL_TLS_KEY"),
+                ),
             )
         else:
             Mysql.execute_query_as_root(
-                f"CHANGE REPLICATION SOURCE TO SOURCE_HOST = '{leader_ip}', "
-                f"SOURCE_PORT = 3306, "
+                "CHANGE REPLICATION SOURCE TO SOURCE_HOST = %s, "
+                "SOURCE_PORT = 3306, "
                 "SOURCE_AUTO_POSITION = 1, SOURCE_CONNECT_RETRY = 5, GET_SOURCE_PUBLIC_KEY = 1",
                 discard_result=True,
+                params=(leader_ip,),
             )
 
         Mysql.execute_query_as_root(
-            f"START REPLICA USER = '{replication_user}' "
-            f"PASSWORD = '{replication_password}'",
+            "START REPLICA USER = %s PASSWORD = %s",
             discard_result=True,
+            params=(replication_user, replication_password),
         )
 
         # Set replicia to read only
@@ -301,9 +314,9 @@ class Mysql:
 
             Mysql.execute_query_as_root("STOP REPLICA", discard_result=True)
             Mysql.execute_query_as_root(
-                f"START REPLICA USER = '{replication_user}' "
-                f"PASSWORD = '{replication_password}'",
+                "START REPLICA USER = %s PASSWORD = %s",
                 discard_result=True,
+                params=(replication_user, replication_password),
             )
 
             # Allow threads time to start before verifying
@@ -411,6 +424,17 @@ class Mysql:
         )
 
         return result[0]["is_subset"] == 1
+
+    @staticmethod
+    def is_valid_gtid_set(gtids):
+        """
+        Check that a GTID set, such as one published by another node, can be parsed
+        """
+        try:
+            Mysql.execute_query_as_root("SELECT GTID_SUBSET(%s, '')", params=(gtids,))
+            return True
+        except mysql.connector.Error:
+            return False
 
     @staticmethod
     def set_replication_unhealthy_flag(unhealthy):
@@ -523,13 +547,18 @@ class Mysql:
 
     @staticmethod
     def execute_statement_or_exit(
-        sql=None, username="root", password=None, database="mysql", port=None
+        sql=None, username="root", password=None, database="mysql", port=None, params=None
     ):
         """
         Execute the given SQL statement.
         """
         result = Mysql.execute_statement(
-            sql=sql, username=username, port=port, password=password, database=database
+            sql=sql,
+            username=username,
+            port=port,
+            password=password,
+            database=database,
+            params=params,
         )
         if not result:
             sys.exit(1)
@@ -542,6 +571,7 @@ class Mysql:
         database="mysql",
         port=None,
         log_error=True,
+        params=None,
     ):
         """
         Execute the given SQL statement.
@@ -562,7 +592,7 @@ class Mysql:
 
             cursor = cnx.cursor()
 
-            cursor.execute(sql)
+            cursor.execute(sql, params)
 
             cnx.close()
             return True
@@ -638,7 +668,7 @@ class Mysql:
         replication_password = Utils.get_envvar_or_secret("MYSQL_REPLICATION_PASSWORD")
 
         grants = Mysql.execute_query_as_root(
-            f"SHOW GRANTS FOR '{replication_user}'@'%'"
+            "SHOW GRANTS FOR %s@%s", params=(replication_user, "%")
         )[0].get(f"Grants for {replication_user}@%", "")
         logging.debug(grants)
 
@@ -646,27 +676,39 @@ class Mysql:
             logging.debug("Re-creating replication user")
 
             Mysql.execute_query_as_root(
-                f"CREATE USER '{replication_user}'@'%' "
-                f"IDENTIFIED WITH caching_sha2_password BY '{replication_password}'"
+                "CREATE USER %s@%s IDENTIFIED WITH caching_sha2_password BY %s",
+                params=(replication_user, "%", replication_password),
             )
             Mysql.execute_query_as_root(
-                f"GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '{replication_user}'@'%'"
+                "GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO %s@%s",
+                params=(replication_user, "%"),
             )
             Mysql.execute_query_as_root("FLUSH PRIVILEGES")
         elif (
             grants
-            != f"GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO `{replication_user}`@`%`"
+            != f"GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO {Mysql.quote_identifier(replication_user)}@`%`"
         ):
             logging.debug(
                 "Deleting and re-creating replication user due to incorrect permissions"
             )
 
-            Mysql.execute_query_as_root(f"DROP USER '{replication_user}'@'%'")
             Mysql.execute_query_as_root(
-                f"CREATE USER '{replication_user}'@'%' "
-                f"IDENTIFIED WITH caching_sha2_password BY '{replication_password}'"
+                "DROP USER %s@%s", params=(replication_user, "%")
             )
             Mysql.execute_query_as_root(
-                f"GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '{replication_user}'@'%'"
+                "CREATE USER %s@%s IDENTIFIED WITH caching_sha2_password BY %s",
+                params=(replication_user, "%", replication_password),
+            )
+            Mysql.execute_query_as_root(
+                "GRANT USAGE, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO %s@%s",
+                params=(replication_user, "%"),
             )
             Mysql.execute_query_as_root("FLUSH PRIVILEGES")
+
+    @staticmethod
+    def quote_identifier(identifier):
+        """
+        Quote an identifier, such as a database name, for use in SQL. Identifiers cannot be passed
+        as parameters.
+        """
+        return "`" + identifier.replace("`", "``") + "`"

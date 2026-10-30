@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import ipaddress
 import json
 import logging
 import os
@@ -181,11 +182,15 @@ class Consul:
 
                 if result[1] is not None:
                     for node in result[1]:
-                        node_value = node["Value"]
-                        node_data = json.loads(node_value)
+                        node_data = Consul.parse_node_data(node["Value"])
 
-                        if not "ip_address" in node_data:
-                            logging.error("ip_address missing in %s", node)
+                        # Each node is registered under its own IP address
+                        if (
+                            node_data is None
+                            or node["Key"]
+                            != f"{Consul.instances_path}{node_data['ip_address']}"
+                        ):
+                            logging.error("Invalid node data in %r, ignoring", node["Key"])
                             continue
 
                         nodes.append(node_data)
@@ -198,6 +203,32 @@ class Consul:
                 time.sleep(5)
 
         return nodes
+
+    @staticmethod
+    def parse_node_data(value):
+        """
+        Parse the data of a node from Consul, or return None if it is invalid. The IP address is
+        validated, as it is used to configure replication and ProxySQL.
+        """
+        try:
+            node_data = json.loads(value)
+        except (TypeError, ValueError):
+            return None
+
+        if not isinstance(node_data, dict) or not isinstance(
+            node_data.get("ip_address"), str
+        ):
+            return None
+
+        try:
+            node_data["ip_address"] = str(ipaddress.ip_address(node_data["ip_address"]))
+        except ValueError:
+            return None
+
+        if not isinstance(node_data.get("failover_gtids"), (str, type(None))):
+            return None
+
+        return node_data
 
     @staticmethod
     def is_node_available(node_data):
@@ -339,16 +370,31 @@ class Consul:
                 if result[1] is None:
                     return None
 
-                json_string = result[1]["Value"]
-                server_data = json.loads(json_string)
+                leader_data = Consul.parse_node_data(result[1]["Value"])
 
-                if not "ip_address" in server_data:
-                    logging.error(
-                        "Invalid JSON returned from replication ledader (missing server_id) %s",
-                        json_string,
+                if leader_data is None:
+                    logging.error("Invalid replication leader data in Consul, ignoring")
+                    return None
+
+                ip_address = leader_data["ip_address"]
+
+                # The leader holds its lock with the same session that registered its node, so
+                # only accept a leader that is a registered node
+                leader_session = result[1].get("Session")
+                node = self.client.kv.get(f"{Consul.instances_path}{ip_address}")[1]
+
+                if (
+                    leader_session is None
+                    or node is None
+                    or node.get("Session") != leader_session
+                ):
+                    logging.warning(
+                        "Replication leader %s is not a registered node, ignoring",
+                        ip_address,
                     )
+                    return None
 
-                return server_data["ip_address"]
+                return ip_address
             except:
                 logging.warning(
                     "Unable to get replication leader IP from Consul, retrying in 5 seconds"
@@ -506,7 +552,11 @@ class Consul:
                     logging.error("Node %s not registered in Consul", ip_address)
                     return False
 
-                node_data = json.loads(get_result[1]["Value"])
+                node_data = Consul.parse_node_data(get_result[1]["Value"])
+
+                if node_data is None:
+                    logging.error("Node %s has invalid data in Consul", ip_address)
+                    return False
 
                 node_data["server_id"] = self.server_id
                 node_data["mysql_version"] = self.mysql_version
@@ -561,7 +611,11 @@ class Consul:
                     logging.error("Node %s not registered in Consul", ip_address)
                     return False
 
-                node_data = json.loads(get_result[1]["Value"])
+                node_data = Consul.parse_node_data(get_result[1]["Value"])
+
+                if node_data is None:
+                    logging.error("Node %s has invalid data in Consul", ip_address)
+                    return False
                 node_data["restoring"] = restoring
 
                 json_string = json.dumps(node_data)
@@ -615,7 +669,11 @@ class Consul:
                     logging.error("Node %s not registered in Consul", ip_address)
                     return False
 
-                node_data = json.loads(get_result[1]["Value"])
+                node_data = Consul.parse_node_data(get_result[1]["Value"])
+
+                if node_data is None:
+                    logging.error("Node %s has invalid data in Consul", ip_address)
+                    return False
                 node_data["snapshotting"] = snapshotting
 
                 json_string = json.dumps(node_data)
@@ -673,7 +731,11 @@ class Consul:
                     logging.error("Node %s not registered in Consul", ip_address)
                     return False
 
-                node_data = json.loads(get_result[1]["Value"])
+                node_data = Consul.parse_node_data(get_result[1]["Value"])
+
+                if node_data is None:
+                    logging.error("Node %s has invalid data in Consul", ip_address)
+                    return False
                 node_data["replication_unhealthy"] = unhealthy
 
                 json_string = json.dumps(node_data)
@@ -728,7 +790,11 @@ class Consul:
                     logging.error("Node %s not registered in Consul", ip_address)
                     return False
 
-                node_data = json.loads(get_result[1]["Value"])
+                node_data = Consul.parse_node_data(get_result[1]["Value"])
+
+                if node_data is None:
+                    logging.error("Node %s has invalid data in Consul", ip_address)
+                    return False
                 node_data["failover_gtids"] = gtids
 
                 json_string = json.dumps(node_data)
@@ -775,11 +841,14 @@ class Consul:
 
                 if result[1] is not None:
                     for node in result[1]:
-                        node_value = node["Value"]
-                        node_data = json.loads(node_value)
+                        node_data = Consul.parse_node_data(node["Value"])
+
+                        if node_data is None:
+                            logging.error("Invalid node data in %r, ignoring", node["Key"])
+                            continue
 
                         if not "restoring" in node_data:
-                            logging.error("Restoring flag missing in %s", node)
+                            logging.error("Restoring flag missing in %r", node["Key"])
                             continue
 
                         if node_data["restoring"] is True:
@@ -810,11 +879,14 @@ class Consul:
 
                 if result[1] is not None:
                     for node in result[1]:
-                        node_value = node["Value"]
-                        node_data = json.loads(node_value)
+                        node_data = Consul.parse_node_data(node["Value"])
+
+                        if node_data is None:
+                            logging.error("Invalid node data in %r, ignoring", node["Key"])
+                            continue
 
                         if not "snapshotting" in node_data:
-                            logging.error("Snapshotting flag missing in %s", node)
+                            logging.error("Snapshotting flag missing in %r", node["Key"])
                             continue
 
                         if node_data["snapshotting"] is True:

@@ -335,6 +335,14 @@ class Actions:
 
             node_gtids = node_data.get("failover_gtids")
 
+            # Treat an invalid set as not yet published, rather than failing the failover
+            if node_gtids is not None and not Mysql.is_valid_gtid_set(node_gtids):
+                logging.warning(
+                    "Replica %s has published invalid transactions, ignoring them",
+                    ip_address,
+                )
+                node_gtids = None
+
             if node_gtids is None:
                 if wait_expired:
                     continue

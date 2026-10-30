@@ -37,9 +37,16 @@ class Proxysql:
         logging.info("Performing initial ProxySQL setup")
 
         # Change admin password if needed
-        if Utils.get_envvar_or_secret("PROXYSQL_ADMIN_PASSWORD", "admin") != "admin":
+        admin_password = Utils.get_envvar_or_secret("PROXYSQL_ADMIN_PASSWORD", "admin")
+
+        # Credentials are separated by semicolons in the admin-admin_credentials variable
+        if ";" in admin_password:
+            logging.error("PROXYSQL_ADMIN_PASSWORD must not contain a semicolon")
+            sys.exit(1)
+
+        if admin_password != "admin":
             Mysql.execute_statement_or_exit(
-                sql=f"UPDATE global_variables SET variable_value='admin:{Utils.get_envvar_or_secret('PROXYSQL_ADMIN_PASSWORD', 'admin')}' "
+                sql=f"UPDATE global_variables SET variable_value={Proxysql.quote('admin:' + admin_password)} "
                 "WHERE variable_name='admin-admin_credentials'",
                 username="admin",
                 password="admin",
@@ -63,7 +70,7 @@ class Proxysql:
             "WHERE variable_name='mysql-default_authentication_plugin'"
         )
         Proxysql.perform_sql_query(
-            f"UPDATE global_variables SET variable_value='{Utils.get_envvar('MYSQL_VERSION')}' "
+            f"UPDATE global_variables SET variable_value={Proxysql.quote(Utils.get_envvar('MYSQL_VERSION'))} "
             "WHERE variable_name='mysql-server_version'"
         )
 
@@ -79,11 +86,11 @@ class Proxysql:
         replication_password = Utils.get_envvar_or_secret("MYSQL_REPLICATION_PASSWORD")
 
         Proxysql.perform_sql_query(
-            f"UPDATE global_variables SET variable_value='{replication_user}' "
+            f"UPDATE global_variables SET variable_value={Proxysql.quote(replication_user)} "
             "WHERE variable_name='mysql-monitor_username'"
         )
         Proxysql.perform_sql_query(
-            f"UPDATE global_variables SET variable_value='{replication_password}' "
+            f"UPDATE global_variables SET variable_value={Proxysql.quote(replication_password)} "
             "WHERE variable_name='mysql-monitor_password'"
         )
 
@@ -94,15 +101,15 @@ class Proxysql:
             and Utils.get_envvar("MYSQL_TLS_KEY", False)
         ):
             Proxysql.perform_sql_query(
-                f"UPDATE global_variables SET variable_value='{Utils.get_envvar('MYSQL_TLS_CA')}' "
+                f"UPDATE global_variables SET variable_value={Proxysql.quote(Utils.get_envvar('MYSQL_TLS_CA'))} "
                 "WHERE variable_name='mysql-ssl_p2s_ca'"
             )
             Proxysql.perform_sql_query(
-                f"UPDATE global_variables SET variable_value='{Utils.get_envvar('MYSQL_TLS_CERT')}' "
+                f"UPDATE global_variables SET variable_value={Proxysql.quote(Utils.get_envvar('MYSQL_TLS_CERT'))} "
                 "WHERE variable_name='mysql-ssl_p2s_cert'"
             )
             Proxysql.perform_sql_query(
-                f"UPDATE global_variables SET variable_value='{Utils.get_envvar('MYSQL_TLS_KEY')}' "
+                f"UPDATE global_variables SET variable_value={Proxysql.quote(Utils.get_envvar('MYSQL_TLS_KEY'))} "
                 "WHERE variable_name='mysql-ssl_p2s_key'"
             )
 
@@ -143,7 +150,7 @@ class Proxysql:
         Proxysql.perform_sql_query("DELETE FROM mysql_users")
         Proxysql.perform_sql_query(
             "INSERT INTO mysql_users(username, password, use_ssl, default_hostgroup) "
-            f"VALUES ('{application_user}', '{application_password}', '{use_ssl}', 1)"
+            f"VALUES ({Proxysql.quote(application_user)}, {Proxysql.quote(application_password)}, {use_ssl}, 1)"
         )
 
         # Persist and activate config
@@ -243,7 +250,8 @@ class Proxysql:
 
             Proxysql.perform_sql_query(
                 "INSERT INTO mysql_servers(hostgroup_id, hostname, port, status, use_ssl, max_replication_lag) "
-                f"VALUES ({hostgroup}, '{ip_address}', 3306, '{status}', {use_ssl}, {max_lag})"
+                f"VALUES ({int(hostgroup)}, {Proxysql.quote(ip_address)}, 3306, {Proxysql.quote(status)}, "
+                f"{use_ssl}, {int(max_lag)})"
             )
 
         Proxysql.perform_sql_query("LOAD MYSQL SERVERS TO RUNTIME")
@@ -328,6 +336,15 @@ class Proxysql:
         finally:
             if cnx:
                 cnx.close()
+
+    @staticmethod
+    def quote(value):
+        """
+        Quote a value for use in SQL on the ProxySQL admin interface. Parameters cannot be used, as
+        the connector queries the SQL mode to escape them, which the admin interface does not
+        support. The admin interface is backed by SQLite, which escapes quotes by doubling them.
+        """
+        return "'" + str(value).replace("'", "''") + "'"
 
     @staticmethod
     def perform_sql_query(sql):

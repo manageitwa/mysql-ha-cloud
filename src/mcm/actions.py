@@ -108,6 +108,7 @@ class Actions:
         # changes made on a replica would be transactions that the other replicas do not have
         if replication_leader:
             Mysql.check_replication_user_privileges()
+            Mysql.check_root_accounts()
 
         # Get data from MySQL
         mysql_version = Mysql.execute_query_as_root("SELECT version()")[0]["version()"]
@@ -376,6 +377,13 @@ class Actions:
         Mysql.delete_replication_config()
         Mysql.set_replication_unhealthy_flag(False)
         consul.register_service(True)
+
+        # The root accounts are otherwise only checked when a leader starts, which may not happen
+        # during a rolling update. A failure must not stop the new leader.
+        try:
+            Mysql.check_root_accounts()
+        except Exception:
+            logging.exception("Unable to check the root accounts")
 
         return True
 

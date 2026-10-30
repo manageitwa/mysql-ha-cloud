@@ -96,16 +96,9 @@ class Mysql:
             params=(replication_user, "%"),
         )
 
-        # Change permissions for the root user
+        # Set the password for the root user. Remote root access is set up by check_root_accounts().
         logging.debug("Set permissions for the root user")
         root_password = Utils.get_envvar_or_secret("MYSQL_ROOT_PASSWORD")
-        Mysql.execute_statement_or_exit(
-            "CREATE USER 'root'@%s IDENTIFIED WITH caching_sha2_password BY %s",
-            params=("%", root_password),
-        )
-        Mysql.execute_statement_or_exit(
-            "GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION"
-        )
         Mysql.execute_statement_or_exit(
             "ALTER USER 'root'@'localhost' IDENTIFIED WITH caching_sha2_password BY %s",
             params=(root_password,),
@@ -704,6 +697,42 @@ class Mysql:
                 params=(replication_user, "%"),
             )
             Mysql.execute_query_as_root("FLUSH PRIVILEGES")
+
+    @staticmethod
+    def check_root_accounts():
+        """
+        Ensures that root can only connect from inside the container, or from the hosts defined by
+        MYSQL_ROOT_HOST (comma separated). Remote root accounts for any other host are removed. Runs
+        on the leader, as the accounts are replicated to the replicas.
+        """
+        local_hosts = ["localhost", "127.0.0.1", "::1"]
+        root_hosts = [
+            host.strip()
+            for host in Utils.get_envvar_or_secret("MYSQL_ROOT_HOST", "").split(",")
+            if host.strip() != "" and host.strip() not in local_hosts
+        ]
+
+        for account in Mysql.execute_query_as_root(
+            "SELECT Host FROM mysql.user WHERE User = 'root'"
+        ):
+            if account["Host"] not in local_hosts and account["Host"] not in root_hosts:
+                logging.info("Removing root account for host %s", account["Host"])
+                Mysql.execute_query_as_root(
+                    "DROP USER 'root'@%s", discard_result=True, params=(account["Host"],)
+                )
+
+        for root_host in root_hosts:
+            logging.debug("Ensuring root account for host %s", root_host)
+            Mysql.execute_query_as_root(
+                "CREATE USER IF NOT EXISTS 'root'@%s IDENTIFIED WITH caching_sha2_password BY %s",
+                discard_result=True,
+                params=(root_host, Utils.get_envvar_or_secret("MYSQL_ROOT_PASSWORD")),
+            )
+            Mysql.execute_query_as_root(
+                "GRANT ALL PRIVILEGES ON *.* TO 'root'@%s WITH GRANT OPTION",
+                discard_result=True,
+                params=(root_host,),
+            )
 
     @staticmethod
     def quote_identifier(identifier):

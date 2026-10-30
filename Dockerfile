@@ -5,11 +5,11 @@ FROM mysql:${MYSQL_VERSION}-oracle AS pybuild
 SHELL ["/bin/bash", "-c"]
 
 ENV PYTHONUSERBASE=/cluster/.prefix
-RUN microdnf install -y --nodocs --setopt=install_weak_deps=0 python3-devel python3-pip gcc && \
+RUN microdnf install -y --nodocs --setopt=install_weak_deps=0 python3.14-devel python3.14-pip gcc && \
     microdnf clean all
 
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir --user -r requirements.txt
+RUN python3.14 -m pip install --no-cache-dir --user -r requirements.txt
 
 # ---- Final image ----
 FROM mysql:${MYSQL_VERSION}-oracle
@@ -22,11 +22,13 @@ RUN \
     microdnf install -y --nodocs --setopt=install_weak_deps=0 \
         libev \
         lz4 \
-        perl \
+        # ProxySQL requires Perl. Only the interpreter is installed, as the full perl package also
+        # pulls in development tools and another version of Python.
+        perl-interpreter \
         perl-DBI \
         perl-DBD-MySQL \
         procps \
-        python3 \
+        python3.14 \
         rsync \
         unzip \
         wget && \

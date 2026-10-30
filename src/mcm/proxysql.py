@@ -44,6 +44,16 @@ class Proxysql:
             logging.error("PROXYSQL_ADMIN_PASSWORD must not contain a semicolon")
             sys.exit(1)
 
+        # Only allow access to the admin interface from inside the container
+        Mysql.execute_statement_or_exit(
+            sql="UPDATE global_variables SET variable_value='127.0.0.1:6032' "
+            "WHERE variable_name='admin-mysql_ifaces'",
+            username="admin",
+            password="admin",
+            database="",
+            port=6032,
+        )
+
         if admin_password != "admin":
             Mysql.execute_statement_or_exit(
                 sql=f"UPDATE global_variables SET variable_value={Proxysql.quote('admin:' + admin_password)} "
@@ -53,13 +63,14 @@ class Proxysql:
                 database="",
                 port=6032,
             )
-            Mysql.execute_statement_or_exit(
-                sql="LOAD ADMIN VARIABLES TO RUNTIME",
-                username="admin",
-                password="admin",
-                database="",
-                port=6032,
-            )
+
+        Mysql.execute_statement_or_exit(
+            sql="LOAD ADMIN VARIABLES TO RUNTIME",
+            username="admin",
+            password="admin",
+            database="",
+            port=6032,
+        )
 
         # Persist the admin variables, so the password is kept if ProxySQL is restarted
         Proxysql.perform_sql_query("SAVE ADMIN VARIABLES TO DISK")

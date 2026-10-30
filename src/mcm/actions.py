@@ -31,6 +31,141 @@ class Actions:
     # can become the leader.
     fence_after: ClassVar[int] = Consul.session_ttl - 5
 
+    # Seconds the Consul cluster must have had no leader before recovering it
+    consul_recover_after: ClassVar[int] = 60
+
+    # Seconds after recovering the Consul cluster before it can be recovered again
+    consul_recover_interval: ClassVar[int] = 300
+
+    # When the Consul cluster was first seen without a leader, and when it was last recovered
+    # (monotonic clock)
+    consul_leaderless_since: ClassVar[Optional[float]] = None
+    consul_last_recovery: ClassVar[Optional[float]] = None
+
+    # Whether the Consul agent is being restarted, so that its exit is expected
+    consul_restarting: ClassVar[bool] = False
+
+    @staticmethod
+    def start_consul_recovery_thread():
+        """
+        Start the thread that recovers the Consul cluster if it has lost the majority of its
+        servers. It runs separately from the main event loop, which retries requests to Consul for
+        several minutes while Consul has no leader.
+        """
+        logging.info("Starting the Consul recovery thread")
+        threading.Thread(target=Actions.recover_consul_when_needed, args=(), daemon=True).start()
+
+    @staticmethod
+    def recover_consul_when_needed():
+        """
+        Check every 10 seconds whether the Consul cluster needs to be recovered
+        """
+        while True:
+            try:
+                Actions.recover_consul_if_needed()
+            except Exception:
+                logging.exception("Unable to check whether Consul needs to be recovered")
+
+            time.sleep(10)
+
+    @staticmethod
+    def get_other_running_mysql_servers():
+        """
+        Get the IPs of the service's other tasks that are running MySQL. MySQL only runs once a node
+        has its data, so none are running in a cold start of the whole cluster.
+        """
+        return [
+            ip_address
+            for ip_address in Consul.get_service_task_ips()
+            if ip_address != Consul.getLocalIp() and Mysql.is_server_running(ip_address)
+        ]
+
+    @staticmethod
+    def recover_consul_if_needed():
+        """
+        Recover the Consul cluster if it has lost the majority of its servers. Consul cannot elect a
+        leader in this case, and as the servers' data is not kept, the lost servers never return,
+        so it cannot recover on its own.
+
+        The Consul servers that are not running are only treated as lost if they are no longer tasks
+        of the service and Swarm has started replacements, so that Swarm, rather than this node,
+        decides that they are gone. If they are still running, such as in a network partition, the
+        cluster is left without a leader rather than risk a second Consul cluster being created.
+
+        To recover, the remaining servers discard their Consul data and bootstrap a new Consul
+        cluster, which the replacements then join. The MySQL leader is then decided again by
+        failover, which promotes the node with the most recent transactions.
+        """
+        consul = Consul.get_instance()
+
+        if consul.has_leader() is not False:
+            Actions.consul_leaderless_since = None
+            return
+
+        now = time.monotonic()
+
+        if Actions.consul_leaderless_since is None:
+            Actions.consul_leaderless_since = now
+
+        leaderless_for = now - Actions.consul_leaderless_since
+
+        if leaderless_for < Actions.consul_recover_after or (
+            Actions.consul_last_recovery is not None
+            and now - Actions.consul_last_recovery < Actions.consul_recover_interval
+        ):
+            return
+
+        try:
+            peers = set(consul.get_raft_peer_ips())
+        except Exception:
+            logging.warning("Unable to read the Consul Raft configuration", exc_info=True)
+            return
+
+        tasks = set(Consul.get_service_task_ips())
+        remaining = peers & tasks
+        lost = peers - tasks
+        replacements = tasks - peers
+
+        if (
+            not lost
+            or len(remaining) > len(peers) // 2
+            or not replacements
+            or Consul.getLocalIp() not in remaining
+        ):
+            logging.warning(
+                "Consul has had no leader for %d seconds, but cannot be recovered automatically "
+                "(Consul servers %s, running tasks %s)",
+                leaderless_for,
+                sorted(peers),
+                sorted(tasks),
+            )
+            return
+
+        logging.error(
+            "Consul has lost the majority of its servers (%s are no longer running, %s remain, "
+            "%s are replacements), recovering the Consul cluster with the remaining servers",
+            sorted(lost),
+            sorted(remaining),
+            sorted(replacements),
+        )
+
+        Actions.consul_last_recovery = now
+        Actions.consul_leaderless_since = None
+        Actions.consul_restarting = True
+
+        try:
+            Actions.consul_process = Consul.agent_restart(
+                Actions.consul_process, len(remaining)
+            )
+        finally:
+            Actions.consul_restarting = False
+
+        try:
+            consul.reset_session()
+        except Exception:
+            # The session is also recreated by the main event loop if it cannot be renewed
+            logging.exception("Unable to register this node with the recovered Consul cluster")
+
     @staticmethod
     def join_or_bootstrap():
         """
@@ -43,8 +178,16 @@ class Actions:
         Proxysql.start_proxysql()
         Proxysql.inital_setup()
 
-        # Start the local consul agent
-        consul_process = Consul.agent_start()
+        # Start the local consul agent. A new Consul cluster is only bootstrapped in a cold start of the
+        # whole cluster. Otherwise the agent only joins the existing Consul cluster, so that a separate
+        # Consul cluster is never bootstrapped while other nodes are running, such as when most of
+        # the Consul servers have been lost and their replacements start.
+        if Actions.get_other_running_mysql_servers():
+            consul_process = Consul.agent_start()
+        else:
+            consul_process = Consul.agent_start(
+                Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_EXPECT", "3")
+            )
 
         # Keep the ProxySQL backend servers up to date with the cluster. The Consul connection is
         # created first, as it is shared with the update thread.
@@ -74,12 +217,7 @@ class Actions:
                 # recent than the snapshot, such as when a new Consul cluster is bootstrapped after
                 # most of the Consul servers are lost. Only become the leader from the snapshot if
                 # no other task is running MySQL, as in a cold start of the whole cluster.
-                running = [
-                    ip_address
-                    for ip_address in Consul.get_service_task_ips()
-                    if ip_address != Consul.getLocalIp()
-                    and Mysql.is_server_running(ip_address)
-                ]
+                running = Actions.get_other_running_mysql_servers()
 
                 if running:
                     logging.warning(
@@ -167,6 +305,7 @@ class Actions:
         Actions.mysql_process = mysql_process
         Consul.get_instance().start_session_keepalive_thread()
         Actions.start_fencing_thread()
+        Actions.start_consul_recovery_thread()
         Actions.join_main_event_loop()
 
     @staticmethod
@@ -253,6 +392,7 @@ class Actions:
         while True:
             if (
                 Actions.consul_process is not None
+                and not Actions.consul_restarting
                 and Actions.consul_process.poll() is not None
             ):
                 logging.error(

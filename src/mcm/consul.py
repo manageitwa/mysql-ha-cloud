@@ -6,6 +6,7 @@ import ipaddress
 import json
 import logging
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -15,6 +16,7 @@ import uuid
 
 import consul as pyconsul
 import netifaces
+from consul.callback import CB
 
 from mcm.utils import Utils
 
@@ -29,9 +31,6 @@ class Consul:
 
     # KV prefix
     kv_prefix = "mcm/"
-
-    # Server ID key
-    kv_server_id = kv_prefix + "server_id"
 
     # Instances ID key
     instances_path = kv_prefix + "instances/"
@@ -95,7 +94,7 @@ class Consul:
         # When the node health session was last created or renewed (monotonic clock)
         self.last_session_renewal = None
 
-        self.create_node_health_session()
+        self.create_node_health_session(wait=True)
         self.mysql_version = None
         self.server_id = None
 
@@ -177,17 +176,22 @@ class Consul:
             self.auto_refresh_thread = None
         logging.info("Consul session auto refresh thread is stopped")
 
-    def create_node_health_session(self):
+    def create_node_health_session(self, wait=False):
         """
         Create the node health session
         all created KV entries automatically removed
         on session destory.
+
+        If wait is set, retry until the session is created, such as while a node is starting and the
+        Consul cluster has no leader until it is recovered. Otherwise allow 30 seconds.
         """
 
         session = None
+        attempts = 0
 
-        # Allow 30 seconds for session to be created
-        for _ in range(6):
+        while wait or attempts < 6:
+            attempts += 1
+
             try:
                 # No health checks are attached, so the session is only invalidated by its TTL.
                 # By default, the session would also be invalidated as soon as the Consul agents
@@ -306,70 +310,6 @@ class Consul:
             for node_data in self.get_registered_node_data()
         }
 
-    def get_mysql_server_id(self):
-        """
-        Get the MySQL server id from consul
-
-        Try to get existing value and update to +1
-          * If Update fails, retry
-          * If Key not exists, try to create
-        """
-
-        # Allow 30 seconds for a server ID to be assigned
-        for _ in range(6):
-            try:
-                result = self.client.kv.get(Consul.kv_server_id)
-
-                # Create new key
-                if result[1] is None:
-                    logging.debug(
-                        "Old serverkey %s not found, preparing new one",
-                        Consul.kv_server_id,
-                    )
-
-                    json_string = json.dumps({"last_used_id": 1})
-
-                    # Try to create
-                    put_result = self.client.kv.put(
-                        Consul.kv_server_id, json_string, cas=0
-                    )
-                    if put_result is True:
-                        logging.debug("Created new key, started new server counter")
-                        return 1
-
-                    logging.debug("New key could not be created, retrying")
-                    continue
-
-                # Updating existing key
-                logging.debug("Updating existing key %s", result)
-                json_string = result[1]["Value"]
-                version = result[1]["ModifyIndex"]
-                server_data = json.loads(json_string)
-
-                if not "last_used_id" in server_data:
-                    logging.error(
-                        "Invalid JSON returned (missing last_used_id) %s", json_string
-                    )
-
-                server_data["last_used_id"] = server_data["last_used_id"] + 1
-                json_string = json.dumps(server_data)
-                put_result = self.client.kv.put(
-                    Consul.kv_server_id, json_string, cas=version
-                )
-
-                if put_result is True:
-                    logging.debug(
-                        "Successfully updated consul value %s, new server_id is %i",
-                        put_result,
-                        server_data["last_used_id"],
-                    )
-                    return server_data["last_used_id"]
-            except:
-                logging.debug("Unable to get MYSQL server ID, retrying in 5 seconds")
-                time.sleep(5)
-
-        raise Exception("Unable to determine server id")
-
     def holds_replication_leader_lock(self):
         """
         Check once if this node holds the replication leader lock, without retrying. Returns False
@@ -468,6 +408,12 @@ class Consul:
         Try to become the new replication leader
         """
 
+        # Without a session, the leader key would be written without a lock, so it would never be
+        # released and no node could become the leader
+        if self.node_health_session is None:
+            logging.warning("No Consul session, unable to become replication leader")
+            return False
+
         # Allow 3 minutes of retries
         for _ in range(36):
             try:
@@ -557,8 +503,11 @@ class Consul:
                 json_string = json.dumps(
                     {
                         "ip_address": ip_address,
-                        "server_id": "",
-                        "mysql_version": "",
+                        # Known when the node registers again, such as after Consul is recovered
+                        "server_id": self.server_id if self.server_id is not None else "",
+                        "mysql_version": (
+                            self.mysql_version if self.mysql_version is not None else ""
+                        ),
                         "snapshotting": False,
                         "restoring": False,
                         "replication_unhealthy": self.replication_unhealthy,
@@ -1022,9 +971,11 @@ class Consul:
         return True
 
     @staticmethod
-    def agent_start():
+    def agent_start(bootstrap_expect=None):
         """
-        Start the local Consul agent.
+        Start the local Consul agent. If bootstrap_expect is given, the agent bootstraps a new
+        Consul cluster once that many servers are available. Otherwise it only joins an existing
+        Consul cluster.
         """
         if Consul.getLocalIp() is None:
             logging.error(
@@ -1068,8 +1019,9 @@ class Consul:
             f"tasks.{Utils.get_envvar_or_secret('CONSUL_BOOTSTRAP_SERVICE', 'mysql')}"
         )
 
-        consul_args.append("-bootstrap-expect")
-        consul_args.append(Utils.get_envvar_or_secret("CONSUL_BOOTSTRAP_EXPECT", "3"))
+        if bootstrap_expect is not None:
+            consul_args.append("-bootstrap-expect")
+            consul_args.append(str(bootstrap_expect))
 
         if ui_enabled:
             consul_args.append("-ui")
@@ -1083,6 +1035,66 @@ class Consul:
         time.sleep(1)
 
         return consul_process
+
+    @staticmethod
+    def agent_restart(consul_process, bootstrap_expect):
+        """
+        Stop the local Consul agent, discard its data and start it again, so that it bootstraps or
+        joins a new Consul cluster. Used to recover when the Consul cluster has lost the majority of
+        its servers, which it cannot recover from on its own.
+        """
+        logging.warning("Restarting the Consul agent with its data discarded")
+        consul_process.terminate()
+
+        try:
+            consul_process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            consul_process.kill()
+            consul_process.wait()
+
+        # The data directory is expected to be a mount point, so only its contents are removed
+        for entry in os.listdir(Consul.data_dir):
+            path = os.path.join(Consul.data_dir, entry)
+
+            if os.path.isdir(path) and not os.path.islink(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+
+        return Consul.agent_start(bootstrap_expect)
+
+    def has_leader(self):
+        """
+        Check if the Consul cluster has a leader. Returns None if the local agent cannot be reached.
+        """
+        try:
+            return self.client.status.leader() != ""
+        except Exception:
+            return None
+
+    def get_raft_peer_ips(self):
+        """
+        Get the IPs of the Consul servers in this server's Raft configuration. The local copy of
+        the configuration is read, so this works when the Consul cluster has no leader.
+        """
+        result = self.client.http.get(
+            CB.json(),
+            "/v1/operator/raft/configuration",
+            params=[("stale", "")],
+            headers={"X-Consul-Token": Consul.get_acl_token()},
+        )
+
+        return [server["Address"].rsplit(":", 1)[0] for server in result["Servers"]]
+
+    def reset_session(self):
+        """
+        Create a new node health session and register this node again, such as after the Consul
+        agent has joined a new Consul cluster. The old session is replaced once the new session has
+        been created, so that there is always a session for the other threads to use.
+        """
+        self.create_node_health_session()
+        self.register_node()
+        self.populate_node_info(self.mysql_version, self.server_id)
 
     @staticmethod
     def write_agent_config():

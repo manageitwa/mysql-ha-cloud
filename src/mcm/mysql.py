@@ -2,6 +2,7 @@
 
 import logging
 import os
+import secrets
 import socket
 import subprocess
 import sys
@@ -137,8 +138,7 @@ class Mysql:
         """
         Build the MySQL server configuratuion.
         """
-        consul = Consul.get_instance()
-        server_id = consul.get_mysql_server_id()
+        server_id = Mysql.choose_server_id()
 
         outfile = open("/etc/mysql/conf.d/zz_cluster.cnf", "w")
         outfile.write("# DO NOT EDIT - This file was generated automatically\n")
@@ -235,6 +235,56 @@ class Mysql:
             "SET GLOBAL super_read_only = 0", discard_result=True
         )
         Mysql.execute_query_as_root("SET GLOBAL read_only = 0", discard_result=True)
+
+    @staticmethod
+    def choose_server_id():
+        """
+        Choose a random server ID that is not used by a running server. A replica ignores
+        transactions written by a server with its own server ID, so an ID must not be reused while
+        transactions written with it can still be replicated, such as those of a leader that has
+        been lost. No record of past server IDs is kept, so a random ID is used, which makes reuse
+        very unlikely.
+        """
+        used_server_ids = set(Mysql.get_other_server_ids())
+
+        while True:
+            server_id = secrets.randbelow(4294967295) + 1
+
+            if server_id not in used_server_ids:
+                return server_id
+
+    @staticmethod
+    def get_other_server_ids():
+        """
+        Get the server IDs of the MySQL servers running on the service's other tasks
+        """
+        server_ids = []
+
+        for ip_address in Consul.get_service_task_ips():
+            if ip_address == Consul.getLocalIp():
+                continue
+
+            cnx = None
+
+            try:
+                cnx = mysql.connector.connect(
+                    host=ip_address,
+                    port=3306,
+                    user=Utils.get_envvar_or_secret("MYSQL_REPLICATION_USER"),
+                    password=Utils.get_envvar_or_secret("MYSQL_REPLICATION_PASSWORD"),
+                    connection_timeout=3,
+                )
+                cursor = cnx.cursor()
+                cursor.execute("SELECT @@GLOBAL.server_id")
+                server_ids.append(int(cursor.fetchone()[0]))
+            except mysql.connector.Error:
+                # MySQL is not running on this task yet
+                pass
+            finally:
+                if cnx:
+                    cnx.close()
+
+        return server_ids
 
     @staticmethod
     def is_server_running(ip_address):
@@ -436,11 +486,23 @@ class Mysql:
         leader, whether or not they have been applied yet. Transactions from other servers are
         excluded, as replicas may have executed transactions locally or inherited them from a
         snapshot of another replica.
+
+        A server that is not replicating, such as a leader whose leadership was lost when Consul
+        lost its state, returns the transactions written on itself instead. The replicas of that
+        leader return the same server's transactions, so it is promoted again if it has them all.
         """
         slave_status = Mysql.execute_query_as_root("SHOW REPLICA STATUS")
 
         if len(slave_status) != 1 or not slave_status[0].get("Source_UUID"):
-            return ""
+            server_uuid = Mysql.execute_query_as_root("SELECT @@GLOBAL.server_uuid AS uuid")[
+                0
+            ]["uuid"]
+
+            return Mysql.execute_query_as_root(
+                "SELECT GTID_SUBTRACT(@@GLOBAL.gtid_executed, "
+                "GTID_SUBTRACT(@@GLOBAL.gtid_executed, %s)) AS gtids",
+                params=(f"{server_uuid}:1-9223372036854775806",),
+            )[0]["gtids"]
 
         all_leader_gtids = f"{slave_status[0]['Source_UUID']}:1-9223372036854775806"
 

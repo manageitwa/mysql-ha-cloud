@@ -2,6 +2,7 @@
 
 import logging
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -234,6 +235,19 @@ class Mysql:
             "SET GLOBAL super_read_only = 0", discard_result=True
         )
         Mysql.execute_query_as_root("SET GLOBAL read_only = 0", discard_result=True)
+
+    @staticmethod
+    def is_server_running(ip_address):
+        """
+        Check if a MySQL server is accepting connections at the given IP address. MySQL only listens
+        once it has been started with its data, so this is false for a node that is still restoring
+        a snapshot or initialising.
+        """
+        try:
+            with socket.create_connection((ip_address, 3306), timeout=2):
+                return True
+        except OSError:
+            return False
 
     @staticmethod
     def is_writable():

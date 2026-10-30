@@ -70,6 +70,26 @@ class Actions:
             ]
 
             if len(nodes) == 0:
+                # Consul may have lost its state while other nodes are still running with data more
+                # recent than the snapshot, such as when a new Consul cluster is bootstrapped after
+                # most of the Consul servers are lost. Only become the leader from the snapshot if
+                # no other task is running MySQL, as in a cold start of the whole cluster.
+                running = [
+                    ip_address
+                    for ip_address in Consul.get_service_task_ips()
+                    if ip_address != Consul.getLocalIp()
+                    and Mysql.is_server_running(ip_address)
+                ]
+
+                if running:
+                    logging.warning(
+                        "No nodes are registered in Consul, but MySQL is running on other nodes "
+                        "(%s), waiting instead of becoming the leader from the snapshot",
+                        running,
+                    )
+                    time.sleep(5)
+                    continue
+
                 logging.info("No other nodes detected, we can become the leader")
                 break
 

@@ -1177,6 +1177,19 @@ class Consul:
         return Consul.acl_token
 
     @staticmethod
+    def get_service_task_ips():
+        """
+        Get the IPs of the service's tasks from the service DNS. Docker only lists running tasks
+        that have passed their health check.
+        """
+        try:
+            return socket.gethostbyname_ex(
+                f"tasks.{Utils.get_envvar_or_secret('CONSUL_BOOTSTRAP_SERVICE', 'mysql')}"
+            )[2]
+        except socket.gaierror:
+            return []
+
+    @staticmethod
     def getLocalIp():
         """
         Get the local IP, based on the service being bootstrapped
@@ -1187,12 +1200,7 @@ class Consul:
         # Docker only adds this node to the service DNS once it passes its health check, so allow a
         # minute for it to appear
         for _ in range(30):
-            try:
-                ip_addresses = socket.gethostbyname_ex(
-                    f"tasks.{Utils.get_envvar_or_secret('CONSUL_BOOTSTRAP_SERVICE', 'mysql')}"
-                )[2]
-            except socket.gaierror:
-                ip_addresses = []
+            ip_addresses = Consul.get_service_task_ips()
 
             for interface in netifaces.interfaces():
                 if interface == "lo":

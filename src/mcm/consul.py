@@ -366,6 +366,7 @@ class Consul:
         for _ in range(36):
             try:
                 result = self.client.kv.get(Consul.replication_leader_path)
+                Utils.clear_repeated_log("replication_leader_ip")
 
                 if result[1] is None:
                     return None
@@ -396,8 +397,12 @@ class Consul:
 
                 return ip_address
             except:
-                logging.warning(
-                    "Unable to get replication leader IP from Consul, retrying in 5 seconds"
+                # This is checked every second, so while Consul has no leader it would otherwise be
+                # logged every 5 seconds
+                Utils.log_repeated(
+                    "replication_leader_ip",
+                    logging.WARNING,
+                    "Unable to get replication leader IP from Consul, retrying in 5 seconds",
                 )
                 time.sleep(5)
 
